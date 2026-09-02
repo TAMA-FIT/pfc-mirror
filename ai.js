@@ -1,4 +1,4 @@
-// ai.js : AI通信・マイク制御・外部連携・チャットUI描画
+// ai.js : PFC v7 Trainer AI・音声食事記録・画像解析・チャットUI統合ランタイム
 
 const gasUrl = "https://script.google.com/macros/s/AKfycbxRNfeijUEwXwoFgBYbS60S5zn2fcuqHSm4TAbRePUzjTjqInXu10ZmK4cUvxoJ-dCAxw/exec";
 let recognition;
@@ -49,7 +49,7 @@ window.openChatGPTAndCopy = function (foodName) {
     const text = `「${foodName}」の一般的なカロリーと、PFC（タンパク質・脂質・炭水化物）の数値を調べてください。\n\nまた、私が食事管理アプリにそのままコピペして記録できるよう、回答の最後に以下のフォーマットの〇〇に数値を埋めたテキストを、ワンタップでコピーできるように「マークダウンのコードブロック（\`\`\`）」で囲んで出力してください。\n\n\`\`\`\n${foodName}を食べたよ！カロリーは〇〇kcal、Pは〇〇g、Fは〇〇g、Cは〇〇gだって！\n\`\`\``;
     const textArea = document.createElement("textarea"); textArea.value = text; textArea.style.position = 'fixed'; textArea.style.top = '0'; textArea.style.left = '0'; textArea.style.opacity = '0'; document.body.appendChild(textArea); textArea.focus(); textArea.select(); try { document.execCommand('copy'); } catch (err) { } document.body.removeChild(textArea);
     if (navigator.clipboard) { navigator.clipboard.writeText(text).catch(() => { }); }
-    showToast("🤖 質問文をコピーしたたま！\nそのまま貼り付けて聞いてね！"); setTimeout(() => { window.open("https://chatgpt.com/", "_blank"); }, 300);
+    showToast("🤖 質問文をコピーしました。\nそのまま貼り付けて質問できます。"); setTimeout(() => { window.open("https://chatgpt.com/", "_blank"); }, 300);
 };
 
 // ▼▼▼ マイク制御（トグル挙動・状態リセット） ▼▼▼
@@ -154,7 +154,7 @@ function toggleMic() {
     const micBtn = document.getElementById('mic-btn'); const inputEl = document.getElementById('chat-input');
     if (isRecording) { forceStopMic(); return; }
     startRecognition(
-        () => { micBtn.classList.add('recording'); inputEl.placeholder = "聞いてるたま！喋って！"; inputEl.value = ''; },
+        () => { micBtn.classList.add('recording'); inputEl.placeholder = "聞いています。話してください。"; inputEl.value = ''; },
         (text) => { inputEl.value = text; sendTamaChat(); }
     );
 }
@@ -178,7 +178,7 @@ window.toggleVoiceMic = function () {
 
 function startRecognition(onStartCallback, onResultCallback) {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SpeechRecognition) { showToast("お使いのブラウザは音声入力非対応だたま！"); return; }
+    if (!SpeechRecognition) { showToast("このブラウザは音声入力に対応していません。"); return; }
 
     recognition = new SpeechRecognition(); recognition.lang = 'ja-JP'; recognition.continuous = false; recognition.interimResults = false;
     speechLatestText = "";
@@ -224,7 +224,7 @@ function startRecognition(onStartCallback, onResultCallback) {
         if (event.error === 'not-allowed') {
             micPermissionReady = false;
             localStorage.removeItem('tf_mic_permission_ready');
-            showToast("マイクの許可がないみたいだたま！\niPhoneのホーム画面からだと使えないことがあるからSafariで開いてたま！");
+            showToast("マイクの使用が許可されていません。\niPhoneのホーム画面版で動かない場合はSafariから開いてください。");
         }
     };
     recognition.onend = () => {
@@ -283,10 +283,10 @@ function addChatMsg(role, text, isHTML = false) {
     const createMsgNode = (isVoiceBox = false) => {
         const div = document.createElement('div'); div.className = `msg ${role}`;
         const iconDiv = document.createElement('div'); iconDiv.className = 'icon';
-        if (role === 'bot' && isVoiceBox) {
-            iconDiv.innerHTML = '<div style="background:#dee2e6; color:#495057; border-radius:50%; width:100%; height:100%; display:flex; align-items:center; justify-content:center; font-size:22px;">🤖</div>';
+        if (role === 'bot') {
+            iconDiv.innerHTML = '<div class="trainer-ai-icon" aria-label="Trainer AI">AI</div>';
         } else {
-            iconDiv.innerHTML = '<img src="new_tama.png">';
+            iconDiv.innerHTML = '<div class="user-chat-icon">YOU</div>';
         }
         const textDiv = document.createElement('div'); textDiv.className = 'text';
         if (isHTML) textDiv.innerHTML = text; else textDiv.innerHTML = escapeHTML(text).replace(/\n/g, '<br>');
@@ -453,10 +453,13 @@ async function sendTamaChat() {
     if (text === lastTamaChatSendText && now - lastTamaChatSendAt < 2500) { inputEl.value = ''; return; }
     lastTamaChatSendText = text;
     lastTamaChatSendAt = now;
-    addChatMsg('user', text); inputEl.value = ''; inputEl.disabled = true; const loadingId = addChatMsg('bot', 'たまちゃん考え中...');
+    addChatMsg('user', text); inputEl.value = ''; inputEl.disabled = true; const loadingId = addChatMsg('bot', '回答を作成しています…');
     await processAIChat(text, loadingId, false);
     inputEl.disabled = false;
 }
+
+window.sendTamaChat = sendTamaChat;
+window.sendTrainerChat = sendTamaChat;
 
 window.sendVoiceChat = async function () {
     const inputEl = document.getElementById('v-chat-input'); const text = inputEl.value.trim(); if (!text) return;
@@ -1139,9 +1142,9 @@ async function processAIChat(text, loadingId, isVoiceMode = false, imageBase64 =
 
     let cheatStateContext = "";
     if (typeof isCheatDay !== 'undefined' && isCheatDay) {
-        let hypeStr = "「最高のご褒美だたま！筋肉も喜んでるたま！」「今日は気にせず美味しく食べるたま！」など、全肯定し全力で甘やかす発言をしてください！！";
+        let hypeStr = "今日はチートデイです。罪悪感を煽らず、楽しみながら翌日以降に通常の食事管理へ戻りやすい、実用的で前向きな助言をしてください。";
         if (typeof isHighCarbMode !== 'undefined' && isHighCarbMode) {
-            hypeStr = "「超絶ハイカーボモード発動だたま！最高の糖質補給で筋肉パンパンだたま！」「炭水化物は裏切らない！ガンガンいくたま！」など、炭水化物を摂ることを徹底的に全肯定し、テンションMAXで褒めちぎってください！！";
+            hypeStr = "ハイカーボ設定です。炭水化物補給の目的を踏まえ、過度に煽らず専門家として簡潔で実用的な助言をしてください。";
         }
         cheatStateContext = `\n【現在チートデイモード発動中！】\nユーザーは現在チートデイを楽しんでいます。カロリー制限などの警告は一切せず、${hypeStr}`;
     }
@@ -1154,7 +1157,7 @@ async function processAIChat(text, loadingId, isVoiceMode = false, imageBase64 =
 
     const context = `【目標】Cal:${TG.cal} P:${TG.p.toFixed(0)} F:${TG.f.toFixed(0)} C:${TG.c.toFixed(0)}\n【現在摂取】Cal:${currentCal} P:${currentP.toFixed(0)} F:${currentF.toFixed(0)} C:${currentC.toFixed(0)}\n【現在時刻】${timeStr}\n【推奨時間帯】${currentMealTime}\n【酒飲みモード】${alcStr}${cheatStateContext}${modeStr}\n【現在の今日の食事記録リスト(ID付き)】\n${recordListText}`;
 
-    let historyText = chatHistory.map(m => `${m.role === 'user' ? 'あなた' : 'たまちゃん'}: ${m.text}`).join('\n');
+    let historyText = chatHistory.map(m => `${m.role === 'user' ? 'あなた' : 'トレーナーAI'}: ${m.text}`).join('\n');
     let userPrefText = "";
     let cheatSheetText = isVoiceMode ? "" : buildDbCheatSheetForAI(text, 18);
 
@@ -1170,7 +1173,7 @@ async function processAIChat(text, loadingId, isVoiceMode = false, imageBase64 =
         const recentHistory = needsVoiceContext ? chatHistory.slice(-2) : [];
         historyText = recentHistory.map(m => `${m.role === 'user' ? 'ユーザー' : 'システム'}: ${m.text}`).join('\n');
     } else {
-        basePrompt = typeof CONSULT_SYSTEM_PROMPT !== 'undefined' ? CONSULT_SYSTEM_PROMPT : 'あなたは「たまちゃんコーチ」です。日本語で自然に、栄養や食事の相談に普通に答えてください。';
+        basePrompt = typeof CONSULT_SYSTEM_PROMPT !== 'undefined' ? CONSULT_SYSTEM_PROMPT : 'あなたは「たまフィット」のトレーナーAIです。丁寧な標準語で、栄養・食事・トレーニングの相談に専門家として簡潔に答えてください。';
         voiceRule = '';
     }
 
@@ -1268,16 +1271,16 @@ async function processAIChat(text, loadingId, isVoiceMode = false, imageBase64 =
         });
 
         const commandWasReturned = addedFoods.length > 0 || replacedFoods.length > 0 || deleteIds.length > 0 || blockedFoods.length > 0;
-        const allowMutation = isVoiceMode;
+        const allowMutation = isVoiceMode || !!imageBase64;
         if (commandWasReturned && !allowMutation) {
             addedFoods = [];
             replacedFoods = [];
             deleteIds = [];
             botReply = botReply.trim();
             if (!/記録|登録|追加|削除|修正|変更|消/.test(botReply)) {
-                botReply += "\n\n※質問として受け取ったので、記録はしていないたま！";
+                botReply += "\n\n※相談チャットでは記録を変更していません。食事記録の操作は「音声記録」から行えます。";
             } else {
-                botReply = "質問として受け取ったので、記録はしていないたま！";
+                botReply = "相談チャットでは記録を変更していません。食事記録の操作は「音声記録」から行えます。";
             }
         }
 
@@ -1285,14 +1288,14 @@ async function processAIChat(text, loadingId, isVoiceMode = false, imageBase64 =
 
         // ★改善箇所：空吹き出しの防止
         if (!botReply) {
-            if (deleteIds.length > 0) botReply = "削除したたま！";
-            else if (replacedFoods.length > 0) botReply = "修正したたま！";
-            else if (addedFoods.length > 0) botReply = "ばっちり記録したたま！";
+            if (deleteIds.length > 0) botReply = "削除しました。";
+            else if (replacedFoods.length > 0) botReply = "修正しました。";
+            else if (addedFoods.length > 0) botReply = "記録しました。";
             else if (blockedFoods.length > 0) botReply = "数値が大きすぎるため、登録を止めました。もう一度短く言ってください。";
-            else botReply = "処理したたま！";
+            else botReply = "処理しました。";
         }
         if (isVoiceMode) {
-            botReply += `<br><details style="margin-top:8px; font-size:11px; color:#64748b;"><summary style="cursor:pointer;">AI生出力</summary><pre style="white-space:pre-wrap; word-break:break-word; margin:6px 0 0;">${escapeHTML(rawText)}</pre></details>`;
+            // Raw model protocol output stays internal; only the sanitized reply is shown.
         }
 
         removeMsg(loadingId); const newMsgId = addChatMsg('bot', botReply, true);
@@ -1379,7 +1382,7 @@ async function processAIChat(text, loadingId, isVoiceMode = false, imageBase64 =
         removeMsg(loadingId);
         const errMsg = error && error.name === 'AbortError'
             ? '処理に時間がかかりすぎました。短めに分けてもう一度送ってください。'
-            : '通信エラーだたま...。もう一度送ってたま！';
+            : '通信エラーが発生しました。もう一度送信してください。';
         addChatMsg('bot', errMsg, false);
         return errMsg;
     }
@@ -1434,12 +1437,12 @@ window.handleCameraUpload = function (event) {
 
             const promptText = "送信された画像が明らかに食べ物や栄養成分表示に関係ない場合（例：ゲームの画面、風景など）は、無理に食べ物として判定せず、「これは食べ物ではありません」や「食べ物だと認識できませんでした」とだけ返答し、絶対に [DATA] フォーマットを出力しないでください。食べ物や栄養成分表示の画像の場合は、画像からカロリーとPFCを読み取るか推測して、いつもの [DATA] フォーマットで出力して。もし「栄養成分表示（裏面のラベル）」の画像なら、商品名を無理に推測せず「成分スキャン」という食品名にして、数値をそのまま正確に使ってください！余計な雑談やコメントは一切不要です！";
             addChatMsg('user', '📷 (画像を送信しました)');
-            const loadingId = addChatMsg('bot', '📷 画像を解析中だたま...');
+            const loadingId = addChatMsg('bot', '📷 画像を解析しています…');
 
             // AIに画像データと一緒にリクエストを送信
             processAIChat(promptText, loadingId, false, base64Data).catch(err => {
                 removeMsg(loadingId);
-                addChatMsg('bot', '画像処理に失敗したたま...。', false);
+                addChatMsg('bot', '画像処理に失敗しました。', false);
             });
         };
         img.src = e.target.result;
@@ -1458,23 +1461,23 @@ window.handleScannerImage = function (base64Data) {
     }
 
     const scannerPrompt = `
-これは食品パッケージの「栄養成分表示（ラベル）」のクローズアップ画像だたま。
-画像内の数値を正確にOCR（文字認識）して、以下のルールで出力してたま！
+これは食品パッケージの「栄養成分表示（ラベル）」のクローズアップ画像です。
+画像内の数値を正確にOCR（文字認識）して、以下のルールで出力してください。
 
-1. 食品名は必ず「🤖 成分スキャン」にしてたま。
-2. 脂質(F)、タンパク質(P)、炭水化物(C)、エネルギー(kcal)を読み取ってたま。
-3. 読み取った数値を [DATA] 朝 | 食品名 | P, F, C, Cal の形式で出力してたま。
-4. 画像が不鮮明で読み取れない場合は「読み取れなかったたま...」とだけ返してたま。
-5. 余計な挨拶や解説は一切不要だたま。
+1. 食品名は必ず「成分スキャン」にしてください。
+2. 脂質(F)、タンパク質(P)、炭水化物(C)、エネルギー(kcal)を読み取ってください。
+3. 読み取った数値を [DATA] 朝 | 食品名 | P, F, C, Cal の形式で出力してください。
+4. 画像が不鮮明で読み取れない場合は「読み取れませんでした」とだけ返してください。
+5. 余計な挨拶や解説は不要です。
 
 スキャン開始！
 `;
 
     addChatMsg('user', '🔍 (成分表をスキャンしました)');
-    const loadingId = addChatMsg('bot', '🔍 成分表を解析中だたま...');
+    const loadingId = addChatMsg('bot', '🔍 成分表を解析しています…');
 
     processAIChat(scannerPrompt.trim(), loadingId, false, base64Data).catch(err => {
         removeMsg(loadingId);
-        addChatMsg('bot', 'スキャン処理に失敗したたま...。', false);
+        addChatMsg('bot', 'スキャン処理に失敗しました。', false);
     });
 };

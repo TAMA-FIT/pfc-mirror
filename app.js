@@ -215,7 +215,7 @@ function addFavoriteQuick(source, i) {
     const logItem = buildFavoriteLogItem(item, amount);
     if (!logItem) return;
     if (typeof isCheatDay !== 'undefined' && isCheatDay && typeof recordOnCheatDay !== 'undefined' && !recordOnCheatDay) {
-        if (typeof showToast === 'function') showToast("🎉 チートデイなのでゲージへの記録をスキップしたたま！");
+        if (typeof showToast === 'function') showToast("🎉 チートデイのため、ゲージへの記録をスキップしました。");
         return;
     }
     lst.push(logItem);
@@ -494,7 +494,7 @@ window.onload = () => {
         svHist(lastDateStr, JSON.parse(JSON.stringify(lst)));
         lst = [];
         localStorage.setItem('tf_dat', JSON.stringify(lst));
-        if (typeof showToast === 'function') showToast(`📅 日付が変わったため、昨日（${lastDateStr}）の記録を自動保存してリセットしたたま！`);
+        if (typeof showToast === 'function') showToast(`📅 日付が変わったため、昨日（${lastDateStr}）の記録を自動保存してリセットしました。`);
     }
 
     // 【改善3】日付が変わっていれば、チートデイやハイカーボモードを強制的に解除
@@ -1082,7 +1082,7 @@ function calcM() {
 function addM() {
     const n = document.getElementById('m-name').value || "未入力"; const time = document.getElementById('m-time').value || "朝"; const m = parseNum(document.getElementById('m-mul').value) || 1;
     if (typeof isCheatDay !== 'undefined' && isCheatDay && typeof recordOnCheatDay !== 'undefined' && !recordOnCheatDay) {
-        if (typeof showToast === 'function') showToast("🎉 チートデイなのでゲージへの記録をスキップしたたま！");
+        if (typeof showToast === 'function') showToast("🎉 チートデイのため、ゲージへの記録をスキップしました。");
         document.getElementById('m-name').value = ''; document.getElementById('m-cal').value = '';
         const amtArea = document.getElementById('amt-area'); amtArea.style.display = 'none'; amtArea.classList.remove('floating-amount-panel'); amtArea.style.removeProperty('--amount-panel-top'); clsBd(); scrollManualCategoriesToCenter();
         return;
@@ -1146,7 +1146,7 @@ function confirmReset() {
     svHist(dateStr, JSON.parse(JSON.stringify(lst)));
     lst = []; sv(); ren(); upd();
     if (typeof closeResetModal === 'function') closeResetModal();
-    if (typeof showToast === 'function') showToast(`${dateStr} の記録として保存し、\n画面をリセットしたたま！`); else alert(`${dateStr} の記録として保存し、リセットしました。`);
+    if (typeof showToast === 'function') showToast(`${dateStr} の記録として保存し、\n画面をリセットしました。`); else alert(`${dateStr} の記録として保存し、リセットしました。`);
 }
 
 // ★バグ2修正：履歴（hist）に保存する時に、お酒（A）の合算も記録するようにしたたま！
@@ -1172,8 +1172,8 @@ function rHist() {
     });
 }
 
-function resHist(i) { if (!confirm("追加しますか？")) return; const addItems = hist[i].l.map((x, idx) => ({ ...x, id: Date.now() + idx })); lst = lst.concat(addItems); sv(); ren(); upd(); if (typeof showToast === 'function') showToast("履歴から復元したたま！"); else alert("復元しました"); }
-function cpHist(i) { const h = hist[i]; let t = `【${h.d}】\n`; h.l.forEach(x => t += `${x.time ? `[${x.time}] ` : ''}${x.N} ${x.Cal}kcal\n`); navigator.clipboard.writeText(t).then(() => { if (typeof showToast === 'function') showToast("コピー完了したたま！"); else alert("コピーしました"); }); }
+function resHist(i) { if (!confirm("追加しますか？")) return; const addItems = hist[i].l.map((x, idx) => ({ ...x, id: Date.now() + idx })); lst = lst.concat(addItems); sv(); ren(); upd(); if (typeof showToast === 'function') showToast("履歴から復元しました。"); else alert("復元しました"); }
+function cpHist(i) { const h = hist[i]; let t = `【${h.d}】\n`; h.l.forEach(x => t += `${x.time ? `[${x.time}] ` : ''}${x.N} ${x.Cal}kcal\n`); navigator.clipboard.writeText(t).then(() => { if (typeof showToast === 'function') showToast("コピーしました。"); else alert("コピーしました"); }); }
 function delHist(i) { if (!confirm("削除しますか？")) return; hist.splice(i, 1); localStorage.setItem('tf_hist', JSON.stringify(hist)); rHist(); }
 function togFav(i, el) {
     const x = fav.indexOf(i);
@@ -1404,7 +1404,7 @@ function drawGraph(type, btn) {
         box.innerHTML = `
         <div class="empty-state">
             <div class="icon">🔍</div>
-            <p>まだデータがないたま！</p>
+            <p>まだデータがありません。</p>
         </div>`;
         document.getElementById('stat-txt').innerHTML = '';
         return;
@@ -1483,7 +1483,7 @@ function saveBody() {
     const d = document.getElementById('b-date').value; const w = parseNum(document.getElementById('b-weight').value); const f = parseNum(document.getElementById('b-fat').value); const waist = parseNum(document.getElementById('b-waist').value);
     if (!d || (!w && !f && !waist)) return alert("日付と数値を入力してください");
     const idx = bodyData.findIndex(x => x.date === d); const rec = { date: d, w: w, f: f, waist: waist }; if (idx >= 0) bodyData[idx] = rec; else bodyData.push(rec);
-    bodyData.sort((a, b) => new Date(a.date) - new Date(b.date)); localStorage.setItem('tf_body', JSON.stringify(bodyData)); if (typeof showToast === 'function') showToast("📉 体組成を記録したたま！"); document.querySelector('.body-inp-grid').classList.remove('editing-mode'); document.getElementById('b-weight').value = ''; document.getElementById('b-fat').value = ''; document.getElementById('b-waist').value = ''; drawBodyGraph('A', document.querySelector('.b-tog-btn')); renderBodyList();
+    bodyData.sort((a, b) => new Date(a.date) - new Date(b.date)); localStorage.setItem('tf_body', JSON.stringify(bodyData)); if (typeof showToast === 'function') showToast("📉 体組成を記録しました。"); document.querySelector('.body-inp-grid').classList.remove('editing-mode'); document.getElementById('b-weight').value = ''; document.getElementById('b-fat').value = ''; document.getElementById('b-waist').value = ''; drawBodyGraph('A', document.querySelector('.b-tog-btn')); renderBodyList();
 }
 function editBody(i) { const d = bodyData[i]; document.getElementById('b-date').value = d.date; document.getElementById('b-weight').value = d.w || ''; document.getElementById('b-fat').value = d.f || ''; document.getElementById('b-waist').value = d.waist || ''; const grid = document.querySelector('.body-inp-grid'); grid.scrollIntoView({ behavior: 'smooth', block: 'center' }); grid.classList.add('editing-mode'); }
 function deleteBody(i) { if (!confirm("この記録を削除しますか？")) return; bodyData.splice(i, 1); localStorage.setItem('tf_body', JSON.stringify(bodyData)); drawBodyGraph('A', document.querySelector('.b-tog-btn')); renderBodyList(); }
@@ -1494,7 +1494,7 @@ function drawBodyGraph(mode, btn) {
         box.innerHTML = `
         <div class="empty-state">
             <div class="icon">📉</div>
-            <p>まだ体組成データがないたま！</p>
+            <p>まだ体組成データがありません。</p>
         </div>`;
         return;
     }

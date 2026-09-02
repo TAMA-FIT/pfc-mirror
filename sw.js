@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tamafit-pfc-mirror-20260826-v1';
+const CACHE_NAME = 'tamafit-pfc-mirror-20260902-v7';
 const APP_SHELL = [
   './',
   './index.html',
@@ -9,9 +9,20 @@ const APP_SHELL = [
   './ai.js',
   './main-inline.js',
   './manifest.json',
+  './manifest-ios.json',
   './icon.png',
-  './new_tama.png',
-  './tama_chara_mini.png'
+  './pfc-v6-chunk-01.js',
+  './pfc-v6-chunk-02.js',
+  './pfc-v6-chunk-03.js',
+  './pfc-v6-chunk-04.js',
+  './pfc-v6-chunk-05.js',
+  './pfc-v6-chunk-06.js',
+  './pfc-v6-chunk-07.js',
+  './pfc-v6-chunk-08.js',
+  './pfc-v6-chunk-09.js',
+  './pfc-v6-chunk-10.js',
+  './pfc-v6-chunk-11.js',
+  './pfc-v6-loader.js'
 ];
 
 self.addEventListener('install', event => {
