@@ -41,8 +41,8 @@
             <span id="ticket-cooldown-text" class="ticket-sub">週に1回のご褒美デー</span>
         </button>
         <h1>
-            <img src="tama_chara_mini.png" alt="キャラ"
-                style="height:40px; vertical-align:middle; margin-right:10px; border-radius:50%; border:2px solid #fff;">
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:40px;margin-right:10px;border-radius:50%;border:2px solid #fff;background:#187a51;color:#fff;font-size:10px;font-weight:900;vertical-align:middle;">PFC</span>
+                
             たまフィットPFC
         </h1>
         <div class="header-refresh" onclick="forceAppUpdate()" title="最新版に更新">
@@ -537,7 +537,7 @@
                     <div class="frame-corner bottom-right"></div>
                     <div class="scanner-line"></div>
                 </div>
-                <div class="scanner-tip">枠の中に成分表を当てはめてたま！</div>
+                <div class="scanner-tip">枠の中に成分表を合わせてください。</div>
             </div>
 
             <!-- スキャナーコントロール -->
@@ -680,7 +680,7 @@
     </div>
 
     <div id="tama-chat-btn" onclick="toggleChat()">
-        <img src="new_tama.png" alt="たまちゃん">
+        <div class="trainer-ai-icon trainer-ai-fab" aria-hidden="true">AI</div>
         <div class="tama-chat-label"
             style="position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.6); color: white; padding: 2px 8px; border-radius: 12px; font-size: 11px; white-space: nowrap; font-weight: bold; pointer-events: none; text-shadow: 0 1px 2px rgba(0,0,0,0.5);">
             AIに相談</div>
@@ -688,13 +688,13 @@
 
     <div id="tama-chat-window">
         <div class="chat-header">
-            <div class="ch-title">🥚 たまちゃんコーチ</div>
+            <div class="ch-title">トレーナーAI</div>
             <div class="ch-close" onclick="toggleChat()">×</div>
         </div>
         <div class="chat-body" id="chat-messages">
             <div class="msg bot">
-                <div class="icon"><img src="new_tama.png"></div>
-                <div class="text">手打ちでの修正や、細かい相談はここで聞くたまよ！</div>
+                <div class="icon"><div class="trainer-ai-icon" aria-hidden="true">AI</div></div>
+                <div class="text">食事・PFC・トレーニングについて相談できます。食事記録の操作は「音声記録」から行えます。</div>
             </div>
         </div>
         <div class="chat-footer">
@@ -881,7 +881,7 @@
 
     <!-- ▼ 新規追加: アルバムUIレンダリング ▼ -->
     <script src="main-inline.js?v=20260524-favorite-split-v35"></script>
-    <!-- PFC Mirror green v6 exact recovery payload -->
+    <!-- PFC Mirror canonical Green runtime -->
     <script src="pfc-v6-chunk-01.js?v=600"></script>
     <script src="pfc-v6-chunk-02.js?v=600"></script>
     <script src="pfc-v6-chunk-03.js?v=600"></script>

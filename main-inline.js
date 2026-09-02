@@ -199,7 +199,7 @@ function startCheatDay(active, consumeTicket = true) {
         TG.cheatReservedDate = null;
         localStorage.setItem('tf_tg', JSON.stringify(TG));
         if (consumeTicket && typeof consumeCheatTicket === 'function') consumeCheatTicket();
-        if (typeof showToast === 'function') showToast("🎉 チートデイ発動！今日は楽しむたま！\n（1週間使えなくなりました）");
+        if (typeof showToast === 'function') showToast("🎉 チートデイ発動！今日は楽しみましょう！\n（1週間使えなくなりました）");
         toggleCheatRecord();
     }
     closeCheatModal();
@@ -218,7 +218,7 @@ function cancelCheatDay() {
 
     if (typeof restoreCheatTicket === 'function') restoreCheatTicket();
 
-    if (typeof showToast === 'function') showToast("チートデイをパスしたたま！チケットを戻したよ！");
+    if (typeof showToast === 'function') showToast("チートデイをパスしました。チケットを戻しました。");
 
     // リセット
     recordOnCheatDay = false;
@@ -596,7 +596,7 @@ async function openScanner() {
         video.srcObject = scannerStream;
     } catch (err) {
         console.error("Scanner Error:", err);
-        alert("カメラの起動に失敗したたま...。権限を確認してたま！");
+        alert("カメラの起動に失敗しました。権限を確認してください。");
         closeScanner();
     }
 }
@@ -655,8 +655,8 @@ async function captureScannerImage() {
         if (typeof window.processAIChat === 'function') {
             if (typeof toggleChat === 'function') toggleChat();
             addChatMsg('user', '📷 (スキャン画像を送信しました)');
-            const loadingId = addChatMsg('bot', '🔍 成分表を解析中だたま...');
-            const scannerPrompt = "これは食品パッケージの成分表のスキャン画像だたま。PFCとカロリーを正確に読み取って [DATA] 形式で出力してたま！";
+            const loadingId = addChatMsg('bot', '🔍 成分表を解析しています…');
+            const scannerPrompt = "これは食品パッケージの成分表のスキャン画像です。PFCとカロリーを正確に読み取り、[DATA] 形式で出力してください。";
             window.processAIChat(scannerPrompt, loadingId, false, base64Data);
         }
     }
