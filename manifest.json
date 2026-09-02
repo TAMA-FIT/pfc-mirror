@@ -4,8 +4,8 @@
   "description": "たまフィット公式 AI食事管理アプリ",
   "start_url": "./index.html",
   "display": "standalone",
-  "background_color": "#f55a94",
-  "theme_color": "#f55a94",
+  "background_color": "#f1faf5",
+  "theme_color": "#22a06b",
   "icons": [
     {
       "src": "icon.png",

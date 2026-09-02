@@ -754,7 +754,7 @@ async function generateAndShareBodyCard() {
         const today = new Date();
         const dateStr = `${today.getFullYear()}年 ${today.getMonth() + 1}月 ${today.getDate()}日`;
 
-        ctx.fillStyle = '#3498db'; // メインカラー
+        ctx.fillStyle = '#22a06b'; // メインカラー
         ctx.font = 'bold 44px sans-serif';
         ctx.textAlign = 'left';
         ctx.fillText(dateStr, 40, 70);
@@ -784,7 +784,7 @@ async function generateAndShareBodyCard() {
         ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 100, cardWidth, drawHeight);
 
         // 写真とフッターの境界線にメインカラーのライン
-        ctx.fillStyle = '#3498db';
+        ctx.fillStyle = '#22a06b';
         ctx.fillRect(0, 100 + drawHeight, cardWidth, 4);
 
         // --- フッター(データエリア)描画 ---
@@ -808,7 +808,7 @@ async function generateAndShareBodyCard() {
                 ctx.font = 'bold 42px sans-serif';
                 ctx.fillText(val, x - 15, y + 45); // 値
 
-                ctx.fillStyle = '#3498db';
+                ctx.fillStyle = '#22a06b';
                 ctx.font = 'bold 20px sans-serif';
                 ctx.fillText(unit, x + (ctx.measureText(val).width / 2) + 10, y + 45); // 単位
             } else {
