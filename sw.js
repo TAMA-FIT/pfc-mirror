@@ -1,4 +1,4 @@
-const CACHE_NAME = 'tamafit-pfc-mirror-20260902-v7';
+const CACHE_NAME = 'tamafit-pfc-mirror-20260902-v8';
 const APP_SHELL = [
   './',
   './index.html',

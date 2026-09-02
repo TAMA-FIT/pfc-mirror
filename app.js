@@ -643,7 +643,7 @@ function syncCheatTicketModalState() {
         reserveActions = document.createElement('div');
         reserveActions.id = 'cheat-reserved-actions';
         reserveActions.className = 'cheat-reserved-actions';
-        reserveActions.innerHTML = '<button class="m-btn" style="background:#fff0f6; color:#f0528d;" onclick="changeCheatReservation()">日程変更</button><button class="m-btn m-cancel" onclick="cancelCheatReservation()">取消</button>';
+        reserveActions.innerHTML = '<button class="m-btn" style="background:#edf9f3; color:#187a51;" onclick="changeCheatReservation()">日程変更</button><button class="m-btn m-cancel" onclick="cancelCheatReservation()">取消</button>';
         reserveBtn.parentElement.insertBefore(reserveActions, reserveBtn.nextSibling);
     }
     if (!statusEl) return;
