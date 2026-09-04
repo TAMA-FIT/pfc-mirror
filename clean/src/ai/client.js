@@ -141,33 +141,79 @@ export async function parseMealTurn(text, current = [], mode = 'voice') {
 function phraseCandidates(text) {
   return String(text || '')
     .replace(/[、。,.]/g,'|')
-    .replace(/(?:と|や|それと|あと)/g,'|')
+    .replace(/(?:それと|それから|あと|そして|と|や)/g,'|')
     .split('|')
     .map(x => x.trim())
     .filter(Boolean);
 }
 
+function parseSpokenQuantity(raw) {
+  const text = String(raw || '').normalize('NFKC');
+  const m = text.match(/(?:^|\s)(\d+(?:\.\d+)?)\s*(kg|g|グラム|ml|mL|ミリリットル|杯|個|パック|P|本|枚|切れ|食|人前|皿|袋|缶)(?:\s|$)/i)
+    || text.match(/(\d+(?:\.\d+)?)\s*(kg|g|グラム|ml|mL|ミリリットル|杯|個|パック|P|本|枚|切れ|食|人前|皿|袋|缶)/i);
+  if (!m) return null;
+  let amount = Number(m[1]);
+  let unit = String(m[2] || '');
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  if (/^kg$/i.test(unit)) { amount *= 1000; unit = 'g'; }
+  if (unit === 'グラム') unit = 'g';
+  if (/^(ml|mL|ミリリットル)$/i.test(unit)) unit = 'ml';
+  if (/^(P|パック)$/i.test(unit)) unit = 'パック';
+  return { amount, unit, matched: m[0], nameText: text.replace(m[0], ' ').replace(/\s+/g,' ').trim() };
+}
+
 export function optimisticDraft(text, current = []) {
   const parts = phraseCandidates(text);
   const next = current.map(x => ({...x}));
-  const seen = new Set(next.map(x => x.foodId || x.name));
+
   for (const part of parts) {
-    const preferred = resolveFood(part);
-    let hits = preferred ? [preferred] : searchFoods(part, 3);
-    if (!hits.length) {
-      // Scan contained canonical names for fast common multi-food utterances.
-      hits = FOODS.filter(f => f.name.length >= 2 && part.includes(f.name.replace(/\([^)]*\)/,''))).slice(0,3);
+    const qty = parseSpokenQuantity(part);
+    const nameText = normalizeName(qty?.nameText || part).replace(/(?:くらい|ぐらい|ほど|位)$/,'').trim();
+    let food = nameText ? resolveCandidate(nameText) : null;
+
+    if (!food && nameText) {
+      const hits = searchFoods(nameText, 4);
+      food = hits[0] || null;
     }
-    const food = hits[0];
-    if (!food || seen.has(food.id)) continue;
+    if (!food && nameText) {
+      food = FOODS.find(f => {
+        const simple = f.name.replace(/\([^)]*\)/g,'');
+        return simple.length >= 2 && (nameText.includes(simple) || simple.includes(nameText));
+      }) || null;
+    }
+
+    if (!food && qty) {
+      const pending = next.filter(x => x.needsAmount || x.amount == null);
+      if (pending.length === 1) {
+        pending[0].amount = qty.amount;
+        pending[0].unit = qty.unit || pending[0].unit;
+        pending[0].needsAmount = false;
+        pending[0].optimistic = true;
+      }
+      continue;
+    }
+    if (!food) continue;
+
+    const existing = next.find(x => x.foodId === food.id || x.name === food.name);
+    if (existing) {
+      if (qty) {
+        existing.amount = qty.amount;
+        existing.unit = qty.unit || existing.unit || defaultAmount(food).unit;
+        existing.needsAmount = false;
+        existing.optimistic = true;
+      }
+      continue;
+    }
+
     const def = defaultAmount(food);
+    const hasQty = !!qty;
     next.push({
       key: crypto.randomUUID(), name: food.name, query: part, foodId: food.id,
-      amount: food.criticalAmount ? null : def.amount,
-      unit: def.unit, meal: autoMeal(), unresolved:false, needsAmount:food.criticalAmount,
-      assumed: !food.criticalAmount, confidence:0.55, optimistic:true
+      amount: hasQty ? qty.amount : (food.criticalAmount ? null : def.amount),
+      unit: hasQty ? (qty.unit || def.unit) : def.unit,
+      meal: autoMeal(), unresolved:false, needsAmount:!hasQty && food.criticalAmount,
+      assumed: !hasQty && !food.criticalAmount, confidence:0.6, optimistic:true
     });
-    seen.add(food.id);
   }
   return next;
 }

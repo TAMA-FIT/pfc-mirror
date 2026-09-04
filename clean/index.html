@@ -3,16 +3,17 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-  <meta name="theme-color" content="#167a52">
+  <meta name="theme-color" content="#187a51">
   <title>たまフィットPFC</title>
   <link rel="stylesheet" href="./assets/app.css">
 </head>
 <body>
-<header class="topbar">
-  <div class="brand"><div class="brand-mark">PFC</div><div><strong>たまフィットPFC</strong><small>食事を、話して記録</small></div></div>
-  <div class="top-actions"><span class="build">CLEAN 1.0</span><button class="icon-btn" id="reload-btn" title="再読み込み">↻</button></div>
+<header class="header">
+  <div class="app-build-version">CLEAN 1.1</div>
+  <h1>たまフィットPFC</h1>
+  <button class="header-refresh" id="reload-btn" title="最新版に更新" aria-label="最新版に更新">↻</button>
 </header>
-<main class="app-shell">
+<main class="container">
   <section id="view-home"></section>
   <section id="view-history" hidden></section>
   <section id="view-body" hidden></section>
@@ -27,8 +28,6 @@
 <div id="voice-modal" class="modal" hidden><div class="modal-sheet" id="voice-sheet"></div></div>
 <div id="manual-modal" class="modal" hidden><div class="modal-sheet small-sheet" id="manual-sheet"></div></div>
 <div id="toast"></div>
-
-<!-- Pure food table only. No legacy application behavior is loaded. -->
 <script src="./assets/base-foods.js"></script>
 <script>globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__ = DB;</script>
 <script type="module" src="./src/main.js"></script>
