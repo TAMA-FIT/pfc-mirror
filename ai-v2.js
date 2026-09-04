@@ -409,6 +409,34 @@
     };
   }
 
+  // Prefer the recovered V6 Food Master for recognized foods.
+  // Gemini still understands the user's natural language; nutrition truth comes from Food Master.
+  function buildFoodMasterItem(op, forcedId) {
+    if (op?.nutritionSource === 'user') return null;
+    const e = window.__PFC_MEAL_ENGINE_V50__;
+    if (!e?.safeResolveFood || !e?.buildTrustedRecord) return null;
+    const resolved = e.safeResolveFood(String(op?.name || '').trim());
+    const index = Number(resolved?.index);
+    const amount = Number(op?.amount);
+    if (!Number.isFinite(index) || !(amount > 0)) return null;
+    try {
+      const record = e.buildTrustedRecord(index, amount, String(op?.unit || '').trim(), op?.meal, forcedId || undefined);
+      const check = e.validateTrustedRecord?.(record);
+      if (!record || check?.ok === false) return null;
+      record._aiV2 = {
+        version: VERSION,
+        nutritionSource: 'Food Master',
+        model: modelForRequest(),
+        amount,
+        unit: String(op?.unit || '').trim(),
+        at: Date.now()
+      };
+      return record;
+    } catch (_) {
+      return null;
+    }
+  }
+
   function persistRows() {
     try {
       storage().setItem('tf_dat', JSON.stringify(rows()));
@@ -451,7 +479,7 @@
         continue;
       }
 
-      const item = {
+      const item = buildFoodMasterItem(op, op.action === 'replace' && op.targetId ? op.targetId : null) || {
         id: op.action === 'replace' && op.targetId ? op.targetId : Date.now() + Math.floor(Math.random() * 10000),
         N: '🤖 ' + op.name,
         P: op.p,
@@ -475,7 +503,7 @@
       } else {
         rows().push(item);
       }
-      accepted.push({ action: op.action, item, source: op.nutritionSource, confidence: op.confidence });
+      accepted.push({ action: op.action, item, source: item?._mealEngine?.nutritionSource || op.nutritionSource, confidence: op.confidence });
       changed = true;
     }
 
