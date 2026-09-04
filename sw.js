@@ -1,12 +1,14 @@
-const CACHE_NAME = 'tamafit-pfc-mirror-20260904-voice-modes-v5';
+const CACHE_NAME = 'tamafit-pfc-mirror-20260904-voice-modes-v6';
 const AI_V2_SRC = './ai-v2.js?v=20260904-ai2-fm1';
 const EDIT_FIX_SRC = './edit-fix.js?v=20260904-editfix2-fm1';
 const SENIOR_V4_SRC = './senior-v4.js?v=20260904-senior-v4';
 const VOICE_V5_SRC = './voice-modes-v5.js?v=20260904-voice-modes-v5';
+const VOICE_V6_SRC = './voice-modes-v6.js?v=20260904-voice-modes-v6';
 const AI_V2_TAG = `<script src="${AI_V2_SRC}"></script>`;
 const EDIT_FIX_TAG = `<script src="${EDIT_FIX_SRC}"></script>`;
 const SENIOR_V4_TAG = `<script src="${SENIOR_V4_SRC}"></script>`;
 const VOICE_V5_TAG = `<script src="${VOICE_V5_SRC}"></script>`;
+const VOICE_V6_TAG = `<script src="${VOICE_V6_SRC}"></script>`;
 
 const APP_SHELL = [
   './',
@@ -20,6 +22,7 @@ const APP_SHELL = [
   './edit-fix.js',
   './senior-v4.js',
   './voice-modes-v5.js',
+  './voice-modes-v6.js',
   './main-inline.js',
   './manifest.json',
   './manifest-ios.json',
@@ -49,6 +52,7 @@ async function injectRuntime(response) {
   if (!html.includes('edit-fix.js')) tags.push(EDIT_FIX_TAG);
   if (!html.includes('senior-v4.js')) tags.push(SENIOR_V4_TAG);
   if (!html.includes('voice-modes-v5.js')) tags.push(VOICE_V5_TAG);
+  if (!html.includes('voice-modes-v6.js')) tags.push(VOICE_V6_TAG);
   if (tags.length) {
     const block = `${tags.join('\n')}\n`;
     html = html.includes('</body>') ? html.replace('</body>', `${block}</body>`) : `${html}\n${block}`;
