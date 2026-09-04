@@ -1,8 +1,10 @@
-const CACHE_NAME = 'tamafit-pfc-mirror-20260904-ai-v2-foodmaster1';
+const CACHE_NAME = 'tamafit-pfc-mirror-20260904-senior-v4';
 const AI_V2_SRC = './ai-v2.js?v=20260904-ai2-fm1';
 const EDIT_FIX_SRC = './edit-fix.js?v=20260904-editfix2-fm1';
+const SENIOR_V4_SRC = './senior-v4.js?v=20260904-senior-v4';
 const AI_V2_TAG = `<script src="${AI_V2_SRC}"></script>`;
 const EDIT_FIX_TAG = `<script src="${EDIT_FIX_SRC}"></script>`;
+const SENIOR_V4_TAG = `<script src="${SENIOR_V4_SRC}"></script>`;
 
 const APP_SHELL = [
   './',
@@ -14,6 +16,7 @@ const APP_SHELL = [
   './ai.js',
   './ai-v2.js',
   './edit-fix.js',
+  './senior-v4.js',
   './main-inline.js',
   './manifest.json',
   './manifest-ios.json',
@@ -41,6 +44,7 @@ async function injectRuntime(response) {
   const tags = [];
   if (!html.includes('ai-v2.js')) tags.push(AI_V2_TAG);
   if (!html.includes('edit-fix.js')) tags.push(EDIT_FIX_TAG);
+  if (!html.includes('senior-v4.js')) tags.push(SENIOR_V4_TAG);
   if (tags.length) {
     const block = `${tags.join('\n')}\n`;
     html = html.includes('</body>') ? html.replace('</body>', `${block}</body>`) : `${html}\n${block}`;
