@@ -1,0 +1,52 @@
+name: Patch AI2 Food Master bridge
+
+on:
+  push:
+    branches:
+      - chatgpt/foodmaster-ai2-bridge
+    paths:
+      - .github/workflows/patch-foodmaster-ai2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Patch AI V2 and cache rollout
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs=require('fs');
+          let ai=fs.readFileSync('ai-v2.js','utf8');
+          const marker='  function persistRows() {';
+          if(!ai.includes(marker)) throw new Error('persistRows marker missing');
+          const helper=`  // Prefer the recovered V6 Food Master for recognized foods.\n  // Gemini still understands the user's natural language; nutrition truth comes from Food Master.\n  function buildFoodMasterItem(op, forcedId) {\n    if (op?.nutritionSource === 'user') return null;\n    const e = window.__PFC_MEAL_ENGINE_V50__;\n    if (!e?.safeResolveFood || !e?.buildTrustedRecord) return null;\n    const resolved = e.safeResolveFood(String(op?.name || '').trim());\n    const index = Number(resolved?.index);\n    const amount = Number(op?.amount);\n    if (!Number.isFinite(index) || !(amount > 0)) return null;\n    try {\n      const record = e.buildTrustedRecord(index, amount, String(op?.unit || '').trim(), op?.meal, forcedId || undefined);\n      const check = e.validateTrustedRecord?.(record);\n      if (!record || check?.ok === false) return null;\n      record._aiV2 = {\n        version: VERSION,\n        nutritionSource: 'Food Master',\n        model: modelForRequest(),\n        amount,\n        unit: String(op?.unit || '').trim(),\n        at: Date.now()\n      };\n      return record;\n    } catch (_) {\n      return null;\n    }\n  }\n\n`;
+          ai=ai.replace(marker,helper+marker);
+          const itemMarker=`      const item = {\n        id: op.action === 'replace' && op.targetId ? op.targetId : Date.now() + Math.floor(Math.random() * 10000),`;
+          if(!ai.includes(itemMarker)) throw new Error('item marker missing');
+          ai=ai.replace(itemMarker,`      const item = buildFoodMasterItem(op, op.action === 'replace' && op.targetId ? op.targetId : null) || {\n        id: op.action === 'replace' && op.targetId ? op.targetId : Date.now() + Math.floor(Math.random() * 10000),`);
+          ai=ai.replace(`accepted.push({ action: op.action, item, source: op.nutritionSource, confidence: op.confidence });`,`accepted.push({ action: op.action, item, source: item?._mealEngine?.nutritionSource || op.nutritionSource, confidence: op.confidence });`);
+          fs.writeFileSync('ai-v2.js',ai);
+
+          let sw=fs.readFileSync('sw.js','utf8');
+          sw=sw.replace("tamafit-pfc-mirror-20260904-ai-v2-editfix1","tamafit-pfc-mirror-20260904-ai-v2-foodmaster1");
+          sw=sw.replace("./ai-v2.js?v=20260904-ai2","./ai-v2.js?v=20260904-ai2-fm1");
+          sw=sw.replace("./edit-fix.js?v=20260904-editfix1","./edit-fix.js?v=20260904-editfix2-fm1");
+          fs.writeFileSync('sw.js',sw);
+          NODE
+          node --check ai-v2.js
+          node --check edit-fix.js
+          node --check sw.js
+      - name: Commit patched runtime
+        shell: bash
+        run: |
+          git config user.name "PFC Recovery Bot"
+          git config user.email "pfc-recovery@users.noreply.github.com"
+          git add ai-v2.js edit-fix.js sw.js
+          git commit -m "Bridge AI V2 and editor to recovered Food Master"
+          git push origin HEAD:chatgpt/foodmaster-ai2-bridge
