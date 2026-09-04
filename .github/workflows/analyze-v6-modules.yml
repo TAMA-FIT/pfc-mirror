@@ -1,0 +1,62 @@
+name: Analyze V6 recovered modules
+
+on:
+  push:
+    branches:
+      - chatgpt/recover-v6-payload
+    paths:
+      - .github/workflows/analyze-v6-modules.yml
+
+permissions:
+  contents: write
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+      - name: Index and extract nutrition modules
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const src = fs.readFileSync('recovery/v6-overlay-recovered.js','utf8');
+          const lines = src.split(/\r?\n/);
+          const headers = [];
+          lines.forEach((line,i)=>{
+            const m=line.match(/^\/\* ===== (.+?) ===== \*\/$/);
+            if(m) headers.push({name:m[1],line:i+1});
+          });
+          const modules=[];
+          for(let i=0;i<headers.length;i++){
+            const start=headers[i].line-1;
+            const end=i+1<headers.length ? headers[i+1].line-1 : lines.length;
+            modules.push({name:headers[i].name,start:start+1,end,body:lines.slice(start,end).join('\n')});
+          }
+          const selected=modules.filter(m=>/(database|food|meal-editor|multiunit|nutrition|serving|unit)/i.test(m.name));
+          const index=[
+            '# Recovered V6 module index','',
+            `Total lines: ${lines.length}`,
+            `Modules: ${modules.length}`,
+            `Nutrition/editor selected: ${selected.length}`,'',
+            '## All modules',
+            ...modules.map(m=>`- ${m.start}-${m.end}: \`${m.name}\``),
+            '', '## Selected nutrition/editor modules',
+            ...selected.map(m=>`- ${m.start}-${m.end}: \`${m.name}\``)
+          ].join('\n');
+          fs.writeFileSync('recovery/v6-module-index.md',index);
+          fs.writeFileSync('recovery/v6-foodmaster-extract.js',selected.map(m=>m.body).join('\n\n'));
+          console.log(index);
+          NODE
+      - name: Save analysis
+        shell: bash
+        run: |
+          git config user.name "PFC Recovery Bot"
+          git config user.email "pfc-recovery@users.noreply.github.com"
+          git add recovery/v6-module-index.md recovery/v6-foodmaster-extract.js
+          if ! git diff --cached --quiet; then
+            git commit -m "Extract recovered V6 Food Master modules"
+            git push origin HEAD:chatgpt/recover-v6-payload
+          fi
