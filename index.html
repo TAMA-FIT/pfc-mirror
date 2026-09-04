@@ -15,25 +15,40 @@
   <script>
   (() => {
     'use strict';
-    const BUILD = '20260904-v39-static1';
+    const BUILD = '20260904-v40-nosw1';
+    const MIRROR_PATH = '/pfc-mirror/';
     const runtimeBlock = [
       '<script src="ai-v2.js?v=20260904-ai2-fm1"><\/script>',
       '<script src="edit-fix.js?v=20260904-editfix2-fm1"><\/script>',
       '<script src="senior-v4.js?v=20260904-senior-v4"><\/script>',
       '<script src="voice-modes-v5.js?v=20260904-voice-modes-v5"><\/script>',
       '<script src="voice-modes-v6.js?v=20260904-voice-modes-v6"><\/script>',
-      '<script>window.__PFC_STATIC_BOOT__={build:"'+BUILD+'",active:true};window.forceAppUpdate=async function(){try{if("serviceWorker" in navigator){const regs=await navigator.serviceWorker.getRegistrations();await Promise.all(regs.map(r=>r.update().catch(()=>null)));}}catch(_){ }const u=new URL(location.href);u.searchParams.set("_fresh",Date.now());location.replace(u.href);};if("serviceWorker" in navigator){navigator.serviceWorker.register("./sw.js?boot='+BUILD+'").then(r=>r.update()).catch(()=>{});}<\/script>'
+      '<script>window.__PFC_STATIC_BOOT__={build:"'+BUILD+'",active:true,noServiceWorker:true};window.forceAppUpdate=async function(){try{const regs=await navigator.serviceWorker?.getRegistrations?.()||[];await Promise.all(regs.filter(r=>{try{return new URL(r.scope).pathname.startsWith("/pfc-mirror/")}catch(_){return false}}).map(r=>r.unregister().catch(()=>false)));const ks=await caches.keys();await Promise.all(ks.filter(k=>/(pfc-mirror|tamafit-pfc-mirror)/i.test(k)).map(k=>caches.delete(k)));}catch(_){ }const u=new URL(location.origin+"/pfc-mirror/");u.searchParams.set("_fresh",Date.now());location.replace(u.href);};<\/script>'
     ].join('\n');
+
+    async function retireMirrorWorkersAndCaches() {
+      try {
+        if ('serviceWorker' in navigator) {
+          const regs = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(regs.filter(reg => {
+            try { return new URL(reg.scope).pathname.startsWith(MIRROR_PATH); }
+            catch (_) { return false; }
+          }).map(reg => reg.unregister().catch(() => false)));
+        }
+      } catch (_) {}
+      try {
+        const keys = await caches.keys();
+        await Promise.all(keys.filter(k => /(pfc-mirror|tamafit-pfc-mirror)/i.test(k)).map(k => caches.delete(k)));
+      } catch (_) {}
+    }
 
     async function boot() {
       try {
-        if ('serviceWorker' in navigator) {
-          navigator.serviceWorker.register('./sw.js?boot=' + BUILD).then(r => r.update()).catch(() => {});
-        }
-        const res = await fetch('./legacy-index.html?core=' + BUILD, { cache: 'no-store' });
+        await retireMirrorWorkersAndCaches();
+        const res = await fetch('./legacy-index.html?core=' + BUILD + '&t=' + Date.now(), { cache: 'no-store' });
         if (!res.ok) throw new Error('core HTTP ' + res.status);
         let html = await res.text();
-        html = html.replace('>V35<', '>V39 VOICE<');
+        html = html.replace('>V35<', '>V40 VOICE<');
         html = html.includes('</body>')
           ? html.replace('</body>', runtimeBlock + '\n</body>')
           : html + '\n' + runtimeBlock;
@@ -43,7 +58,7 @@
       } catch (err) {
         console.error('[PFC static bootstrap] failed', err);
         const host = document.getElementById('pfc-static-boot');
-        if (host) host.innerHTML = '<div class="boot-card"><div class="boot-mark">!</div><b>最新版の読み込みに失敗しました</b><small>下の修復ページを1回だけ開いてください。食事データは消えません。</small><p><a href="./repair.html" style="display:inline-block;margin-top:10px;padding:12px 18px;border-radius:12px;background:#187a51;color:white;text-decoration:none;font-weight:800">表示を修復する</a></p></div>';
+        if (host) host.innerHTML = '<div class="boot-card"><div class="boot-mark">!</div><b>最新版の読み込みに失敗しました</b><small>下の完全修復ページを1回だけ開いてください。食事データは消えません。</small><p><a href="https://tama-fit.github.io/pfc-legacy-rescue/reset-mirror.html?from=v40" style="display:inline-block;margin-top:10px;padding:12px 18px;border-radius:12px;background:#187a51;color:white;text-decoration:none;font-weight:800">完全修復する</a></p></div>';
       }
     }
     boot();
