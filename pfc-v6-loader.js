@@ -1,25 +1,115 @@
-// PFC Mirror v6 recovery loader. Restores the exact published green v6 overlay payload.
+// PFC Mirror V41 active runtime bootstrap.
+// Important: this file is the only active loader path. It never falls back to V35.
 (() => {
   'use strict';
-  const VERSION='6.0.0-recovered';
-  const JS_SHA='33a8030140d7bdc3d6d610048ce4702db99780aa71bcde22f1401e84b39360ed';
-  const CSS_SHA='725278ea8324f28ee0c592b54e0902543661370eb65ea46ed740577ab69a58e9';
-  const CSS_GZ_B64="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";
-  const b64bytes=s=>{const bin=atob(s);const out=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)out[i]=bin.charCodeAt(i);return out;};
-  const ungzip=async b64=>{const ds=new DecompressionStream('gzip');const stream=new Blob([b64bytes(b64)]).stream().pipeThrough(ds);return await new Response(stream).text();};
-  const sha=async text=>{const dig=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(text));return [...new Uint8Array(dig)].map(x=>x.toString(16).padStart(2,'0')).join('');};
-  async function boot(){
-    const chunks=window.__PFC_V6_GZ_CHUNKS__||[];
-    if(!chunks.length)throw new Error('PFC_V6_PAYLOAD_MISSING');
-    const [css,js]=await Promise.all([ungzip(CSS_GZ_B64),ungzip(chunks.join(''))]);
-    if(await sha(css)!==CSS_SHA)throw new Error('PFC_V6_CSS_SHA_MISMATCH');
-    if(await sha(js)!==JS_SHA)throw new Error('PFC_V6_JS_SHA_MISMATCH');
-    let style=document.getElementById('pfc-v6-recovered-style');
-    if(!style){style=document.createElement('style');style.id='pfc-v6-recovered-style';document.head.appendChild(style);}
-    style.textContent=css;
-    (0,eval)(js+'\n//# sourceURL=pfc-v6-overlay.recovered.js');
-    document.documentElement.classList.add('pfc-v6-green-runtime');
-    window.__PFC_V6_RECOVERY__={version:VERSION,jsSha256:JS_SHA,cssSha256:CSS_SHA,chunks:chunks.length,loadedAt:new Date().toISOString()};
+
+  const BUILD = 'V41 VOICE';
+  const BUILD_ID = '20260904-v41-rebuild1';
+  const MIRROR_SCOPE = '/pfc-mirror/';
+  const CURRENT_SCRIPTS = [
+    'ai-v2.js?v=20260904-ai2-fm1',
+    'edit-fix.js?v=20260904-editfix2-fm1',
+    'senior-v4.js?v=20260904-senior-v4',
+    'voice-modes-v5.js?v=20260904-voice-modes-v5',
+    'voice-modes-v6.js?v=20260904-voice-modes-v6'
+  ];
+
+  window.__PFC_ACTIVE_RUNTIME__ = {
+    build: BUILD,
+    buildId: BUILD_ID,
+    architecture: 'single-active-runtime',
+    legacyFallback: false,
+    serviceWorker: false,
+    startedAt: new Date().toISOString()
+  };
+
+  function paintVersion(label = BUILD) {
+    const nodes = document.querySelectorAll('.app-build-version');
+    nodes.forEach(node => { node.textContent = label; node.setAttribute('data-active-build', BUILD_ID); });
   }
-  boot().catch(err=>{console.error('[PFC v6 recovery]',err);window.__PFC_V6_RECOVERY__={version:VERSION,error:String(err)};});
+
+  function showFatal(message) {
+    paintVersion(BUILD + ' ERROR');
+    let box = document.getElementById('pfc-v41-fatal');
+    if (!box) {
+      box = document.createElement('div');
+      box.id = 'pfc-v41-fatal';
+      box.style.cssText = 'position:fixed;z-index:2147483647;left:12px;right:12px;top:72px;max-width:680px;margin:auto;padding:16px 18px;border-radius:16px;background:#fff3f2;border:2px solid #cf3d35;color:#7c211c;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP",sans-serif;font-weight:800;box-shadow:0 12px 35px rgba(0,0,0,.18)';
+      document.body.appendChild(box);
+    }
+    box.textContent = '最新版の起動に失敗しました。旧版には戻しません。再読み込みしてください。' + (message ? ' (' + message + ')' : '');
+  }
+
+  async function retireOldWorkersAndCaches() {
+    try {
+      if ('serviceWorker' in navigator) {
+        const regs = await navigator.serviceWorker.getRegistrations();
+        await Promise.all(regs.filter(reg => {
+          try { return new URL(reg.scope).pathname.startsWith(MIRROR_SCOPE); }
+          catch (_) { return false; }
+        }).map(reg => reg.unregister().catch(() => false)));
+      }
+    } catch (_) {}
+    try {
+      const keys = await caches.keys();
+      await Promise.all(keys.filter(k => /(pfc-mirror|tamafit-pfc-mirror|pfc-v3|pfc-v35)/i.test(k)).map(k => caches.delete(k)));
+    } catch (_) {}
+  }
+
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      const s = document.createElement('script');
+      s.src = src;
+      s.async = false;
+      s.dataset.pfcV41 = '1';
+      s.onload = () => resolve(src);
+      s.onerror = () => reject(new Error('script load failed: ' + src));
+      document.body.appendChild(s);
+    });
+  }
+
+  async function waitForRecovery(timeoutMs = 7000) {
+    const started = Date.now();
+    while (Date.now() - started < timeoutMs) {
+      if (window.__PFC_V6_RECOVERY__) return window.__PFC_V6_RECOVERY__;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    throw new Error('Food Master recovery timeout');
+  }
+
+  window.forceAppUpdate = async function forceAppUpdateV41() {
+    await retireOldWorkersAndCaches();
+    const u = new URL(location.origin + MIRROR_SCOPE);
+    u.searchParams.set('build', BUILD_ID);
+    u.searchParams.set('t', Date.now());
+    location.replace(u.href);
+  };
+
+  // Paint immediately so the old shell label is never treated as the active version.
+  paintVersion(BUILD + ' BOOT');
+  const observer = new MutationObserver(() => paintVersion(BUILD));
+  observer.observe(document.documentElement, { childList: true, subtree: true });
+
+  (async () => {
+    try {
+      await retireOldWorkersAndCaches();
+
+      // Load the recovered Food Master/V6 engine from an archival implementation file.
+      // This is a dependency, not a rollback target.
+      await loadScript('pfc-v6-loader-recovered.js?v=20260904-v41');
+      await waitForRecovery();
+
+      for (const src of CURRENT_SCRIPTS) await loadScript(src);
+
+      paintVersion(BUILD);
+      window.__PFC_ACTIVE_RUNTIME__.ready = true;
+      window.__PFC_ACTIVE_RUNTIME__.readyAt = new Date().toISOString();
+      document.documentElement.setAttribute('data-pfc-active-build', BUILD_ID);
+    } catch (err) {
+      console.error('[PFC V41 bootstrap] fatal', err);
+      window.__PFC_ACTIVE_RUNTIME__.ready = false;
+      window.__PFC_ACTIVE_RUNTIME__.error = String(err && err.message || err);
+      showFatal(window.__PFC_ACTIVE_RUNTIME__.error);
+    }
+  })();
 })();

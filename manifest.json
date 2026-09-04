@@ -2,20 +2,13 @@
   "name": "たまフィットPFC",
   "short_name": "たまPFC",
   "description": "たまフィット公式 AI食事管理アプリ",
-  "start_url": "./index.html",
+  "id": "./",
+  "start_url": "./?build=v41",
   "display": "standalone",
   "background_color": "#f1faf5",
   "theme_color": "#22a06b",
   "icons": [
-    {
-      "src": "icon.png",
-      "sizes": "192x192",
-      "type": "image/png"
-    },
-    {
-      "src": "icon.png",
-      "sizes": "512x512",
-      "type": "image/png"
-    }
+    { "src": "icon.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
