@@ -3,28 +3,34 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <meta name="theme-color" content="#167a52">
   <title>たまフィットPFC</title>
-  <!-- Legacy SW injection guard only; these filenames are NOT active here: ai-v2.js edit-fix.js senior-v4.js voice-modes-v5.js voice-modes-v6.js -->
-  <style>body{margin:0;background:#f3f8f5;color:#173126;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP",sans-serif;display:grid;place-items:center;min-height:100vh}.box{text-align:center;padding:28px}.v{font-weight:900;color:#187a51;margin-bottom:10px}.spin{font-size:34px;margin:12px}a{color:#187a51;font-weight:800}</style>
+  <link rel="stylesheet" href="./clean/assets/app.css">
 </head>
 <body>
-  <div class="box"><div class="v">V42 起動中</div><div class="spin">↻</div><div>最新版へ切り替えています…</div><p><a href="/pfc-mirror/v42/">切り替わらない場合はこちら</a></p></div>
-  <script>
-  (async()=>{
-    try{
-      if('serviceWorker' in navigator){
-        const regs=await navigator.serviceWorker.getRegistrations();
-        for(const reg of regs){
-          try{if(new URL(reg.scope).pathname.startsWith('/pfc-mirror/')) await reg.unregister();}catch(_){ }
-        }
-      }
-      try{for(const key of await caches.keys()) if(/(pfc-mirror|tamafit-pfc-mirror|pfc-v3|pfc-v35|voice-modes)/i.test(key)) await caches.delete(key);}catch(_){ }
-    }catch(_){ }
-    const u=new URL('/pfc-mirror/v42/',location.origin);
-    u.searchParams.set('entry','root');
-    u.searchParams.set('t',Date.now());
-    location.replace(u.href);
-  })();
-  </script>
+<header class="topbar">
+  <div class="brand"><div class="brand-mark">PFC</div><div><strong>たまフィットPFC</strong><small>食事を、話して記録</small></div></div>
+  <div class="top-actions"><span class="build">CLEAN 1.0</span><button class="icon-btn" id="reload-btn" title="再読み込み">↻</button></div>
+</header>
+<main class="app-shell">
+  <section id="view-home"></section>
+  <section id="view-history" hidden></section>
+  <section id="view-body" hidden></section>
+  <section id="view-settings" hidden></section>
+</main>
+<nav class="bottom-nav">
+  <button class="nav-btn active" data-view="home"><span>⌂</span>ホーム</button>
+  <button class="nav-btn" data-view="history"><span>◷</span>履歴</button>
+  <button class="nav-btn" data-view="body"><span>♙</span>からだ</button>
+  <button class="nav-btn" data-view="settings"><span>⚙</span>設定</button>
+</nav>
+<div id="voice-modal" class="modal" hidden><div class="modal-sheet" id="voice-sheet"></div></div>
+<div id="manual-modal" class="modal" hidden><div class="modal-sheet small-sheet" id="manual-sheet"></div></div>
+<div id="toast"></div>
+
+<!-- Clean runtime only. Legacy code is not part of the active boot path. -->
+<script src="./clean/assets/base-foods.js"></script>
+<script>globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__ = DB;</script>
+<script type="module" src="./clean/src/main.js"></script>
 </body>
 </html>
