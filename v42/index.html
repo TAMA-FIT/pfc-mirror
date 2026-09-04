@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+  <title>たまフィットPFC V42</title>
+  <!-- Legacy SW injection guard only; these filenames are NOT active in this loader: ai-v2.js edit-fix.js senior-v4.js voice-modes-v5.js voice-modes-v6.js -->
+  <style>body{margin:0;background:#f3f8f5;color:#173126;font-family:-apple-system,BlinkMacSystemFont,"Noto Sans JP",sans-serif;display:grid;place-items:center;min-height:100vh}.box{text-align:center;padding:28px}.v{font-weight:900;color:#187a51;font-size:18px}.spin{font-size:38px;margin:12px}.err{color:#a52d27;max-width:520px;line-height:1.6}</style>
+</head>
+<body>
+  <div class="box" id="boot"><div class="v">V42 VOICE</div><div class="spin">↻</div><div>アプリを起動しています…</div></div>
+  <script>
+  (async()=>{
+    const boot=document.getElementById('boot');
+    try{
+      const res=await fetch('./shell-source.html?build=20260904-v42',{cache:'no-store'});
+      if(!res.ok) throw new Error('shell '+res.status);
+      let html=await res.text();
+
+      html=html.replace('<head>','<head>\n    <base href="/pfc-mirror/">');
+      html=html.replace('>V35</div>','>V42 VOICE</div>');
+      html=html.replace("manifestLink.href = isIOS ? 'manifest-ios.json' : 'manifest.json';","manifestLink.href = isIOS ? '/pfc-mirror/v42/manifest-ios.json' : '/pfc-mirror/v42/manifest.json';");
+      html=html.replace('href="icon.png"','href="/pfc-mirror/icon.png"');
+      html=html.replace(/<link rel="stylesheet" href="style\.css\?v=[^"]+">/,'<link rel="stylesheet" href="/pfc-mirror/v42/style.css">');
+
+      const start=html.indexOf('    <script src="database.js');
+      const marker='    <script src="pfc-v6-loader.js?v=600"></script>';
+      const stop=html.indexOf(marker,start);
+      if(start<0||stop<0) throw new Error('shell script block not found');
+      const end=stop+marker.length;
+      const block=`    <script src="/pfc-mirror/v42/database.js"></script>\n    <script src="/pfc-mirror/v42/tamachan-data.js"></script>\n    <script src="/pfc-mirror/v42/app.js"></script>\n    <script src="/pfc-mirror/v42/ai.js"></script>\n    <script src="/pfc-mirror/v42/main-inline.js"></script>\n\n    <!-- Legacy SW injection guard: ai-v2.js edit-fix.js senior-v4.js voice-modes-v5.js voice-modes-v6.js -->\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-01.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-02.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-03.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-04.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-05.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-06.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-07.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-08.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-09.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-10.js"></script>\n    <script src="/pfc-mirror/v42/pfc-v6-chunk-11.js"></script>\n    <script src="/pfc-mirror/v42/runtime-v42.js"></script>`;
+      html=html.slice(0,start)+block+html.slice(end);
+      if(html.includes('>V35</div>')) throw new Error('V35 label survived transform');
+      if(html.includes('pfc-v6-loader.js?v=600')) throw new Error('legacy loader survived transform');
+
+      document.open();
+      document.write(html);
+      document.close();
+    }catch(err){
+      console.error('[V42 loader]',err);
+      boot.innerHTML='<div class="v">V42 VOICE ERROR</div><p class="err">最新版の起動に失敗しました。旧版には戻していません。<br>'+String(err.message||err)+'</p><button onclick="location.reload()" style="padding:12px 18px;border:0;border-radius:12px;background:#187a51;color:white;font-weight:800">再読み込み</button>';
+    }
+  })();
+  </script>
+</body>
+</html>
