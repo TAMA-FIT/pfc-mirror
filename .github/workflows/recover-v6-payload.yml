@@ -1,0 +1,93 @@
+name: Recover V6 payload
+
+on:
+  push:
+    branches:
+      - chatgpt/recover-v6-payload
+    paths:
+      - .github/workflows/recover-v6-payload.yml
+
+permissions:
+  contents: write
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Decode preserved V6 payload
+        shell: bash
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const zlib = require('zlib');
+          const crypto = require('crypto');
+
+          const chunks = [];
+          for (let i = 1; i <= 11; i++) {
+            const file = `pfc-v6-chunk-${String(i).padStart(2, '0')}.js`;
+            const text = fs.readFileSync(file, 'utf8');
+            const match = text.match(/\.push\("([A-Za-z0-9+/=]+)"\)/);
+            if (!match) throw new Error(`base64 payload not found: ${file}`);
+            chunks.push(match[1]);
+          }
+
+          const loader = fs.readFileSync('pfc-v6-loader.js', 'utf8');
+          const expectedJs = loader.match(/const JS_SHA='([a-f0-9]+)'/)?.[1];
+          const expectedCss = loader.match(/const CSS_SHA='([a-f0-9]+)'/)?.[1];
+          const cssB64 = loader.match(/const CSS_GZ_B64="([A-Za-z0-9+/=]+)"/)?.[1];
+          if (!cssB64) throw new Error('CSS payload not found');
+
+          const js = zlib.gunzipSync(Buffer.from(chunks.join(''), 'base64')).toString('utf8');
+          const css = zlib.gunzipSync(Buffer.from(cssB64, 'base64')).toString('utf8');
+          const sha = s => crypto.createHash('sha256').update(s).digest('hex');
+          const jsSha = sha(js);
+          const cssSha = sha(css);
+          if (expectedJs && jsSha !== expectedJs) throw new Error(`JS SHA mismatch ${jsSha} != ${expectedJs}`);
+          if (expectedCss && cssSha !== expectedCss) throw new Error(`CSS SHA mismatch ${cssSha} != ${expectedCss}`);
+
+          fs.mkdirSync('recovery', { recursive: true });
+          fs.writeFileSync('recovery/v6-overlay-recovered.js', js);
+          fs.writeFileSync('recovery/v6-overlay-recovered.css', css);
+
+          const terms = [
+            '食品番号','日本食品標準成分表','食品成分データベース','文部科学省',
+            'fooddb','mext','foodId','food_id','foodCode','food_code','100g','可食部',
+            '倍率','個数','amount','unit','gram','グラム'
+          ];
+          const lines = js.split(/\r?\n/);
+          const hits = [];
+          for (const term of terms) {
+            const found = [];
+            lines.forEach((line, idx) => {
+              if (line.toLowerCase().includes(term.toLowerCase())) {
+                found.push(`${idx + 1}: ${line.slice(0, 600)}`);
+              }
+            });
+            if (found.length) hits.push(`## ${term}\n${found.slice(0, 30).join('\n')}`);
+          }
+          const report = [
+            '# V6 payload recovery report',
+            '',
+            `JS bytes: ${Buffer.byteLength(js)}`,
+            `JS SHA256: ${jsSha}`,
+            `CSS bytes: ${Buffer.byteLength(css)}`,
+            `CSS SHA256: ${cssSha}`,
+            '',
+            hits.length ? hits.join('\n\n') : 'No target terms found.'
+          ].join('\n');
+          fs.writeFileSync('recovery/v6-recovery-report.md', report);
+          console.log(report);
+          NODE
+
+      - name: Save recovered files on recovery branch
+        shell: bash
+        run: |
+          git config user.name "PFC Recovery Bot"
+          git config user.email "pfc-recovery@users.noreply.github.com"
+          git add recovery/v6-overlay-recovered.js recovery/v6-overlay-recovered.css recovery/v6-recovery-report.md
+          git commit -m "Recover exact V6 overlay payload"
+          git push origin HEAD:chatgpt/recover-v6-payload
