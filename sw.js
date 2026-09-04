@@ -1,6 +1,6 @@
-const CACHE_NAME = 'tamafit-pfc-mirror-20260904-ai-v2-editfix1';
-const AI_V2_SRC = './ai-v2.js?v=20260904-ai2';
-const EDIT_FIX_SRC = './edit-fix.js?v=20260904-editfix1';
+const CACHE_NAME = 'tamafit-pfc-mirror-20260904-ai-v2-foodmaster1';
+const AI_V2_SRC = './ai-v2.js?v=20260904-ai2-fm1';
+const EDIT_FIX_SRC = './edit-fix.js?v=20260904-editfix2-fm1';
 const AI_V2_TAG = `<script src="${AI_V2_SRC}"></script>`;
 const EDIT_FIX_TAG = `<script src="${EDIT_FIX_SRC}"></script>`;
 
