@@ -1,6 +1,8 @@
-const CACHE_NAME = 'tamafit-pfc-mirror-20260904-ai-v2';
+const CACHE_NAME = 'tamafit-pfc-mirror-20260904-ai-v2-editfix1';
 const AI_V2_SRC = './ai-v2.js?v=20260904-ai2';
+const EDIT_FIX_SRC = './edit-fix.js?v=20260904-editfix1';
 const AI_V2_TAG = `<script src="${AI_V2_SRC}"></script>`;
+const EDIT_FIX_TAG = `<script src="${EDIT_FIX_SRC}"></script>`;
 
 const APP_SHELL = [
   './',
@@ -11,6 +13,7 @@ const APP_SHELL = [
   './app.js',
   './ai.js',
   './ai-v2.js',
+  './edit-fix.js',
   './main-inline.js',
   './manifest.json',
   './manifest-ios.json',
@@ -29,40 +32,31 @@ const APP_SHELL = [
   './pfc-v6-loader.js'
 ];
 
-async function injectAiV2(response) {
+async function injectRuntime(response) {
   if (!response) return response;
   const type = response.headers.get('content-type') || '';
   if (!type.includes('text/html')) return response;
 
-  const html = await response.text();
-  if (html.includes('ai-v2.js')) {
-    return new Response(html, {
-      status: response.status,
-      statusText: response.statusText,
-      headers: response.headers
-    });
+  let html = await response.text();
+  const tags = [];
+  if (!html.includes('ai-v2.js')) tags.push(AI_V2_TAG);
+  if (!html.includes('edit-fix.js')) tags.push(EDIT_FIX_TAG);
+  if (tags.length) {
+    const block = `${tags.join('\n')}\n`;
+    html = html.includes('</body>') ? html.replace('</body>', `${block}</body>`) : `${html}\n${block}`;
   }
-
-  const patched = html.includes('</body>')
-    ? html.replace('</body>', `${AI_V2_TAG}\n</body>`)
-    : `${html}\n${AI_V2_TAG}`;
 
   const headers = new Headers(response.headers);
   headers.delete('content-length');
   headers.delete('content-encoding');
   headers.delete('etag');
-
-  return new Response(patched, {
-    status: response.status,
-    statusText: response.statusText,
-    headers
-  });
+  return new Response(html, { status: response.status, statusText: response.statusText, headers });
 }
 
 async function cacheInjectedIndex(cache) {
   const original = await cache.match('./index.html');
   if (!original) return;
-  const injected = await injectAiV2(original);
+  const injected = await injectRuntime(original);
   await cache.put('./index.html', injected.clone());
   await cache.put('./', injected.clone());
 }
@@ -83,26 +77,21 @@ self.addEventListener('activate', event => {
     caches.keys()
       .then(keys => Promise.all(keys.filter(key => key !== CACHE_NAME).map(key => caches.delete(key))))
       .then(() => self.clients.claim())
-      // One-time reload after this new worker activates so AI V2 is injected
-      // immediately even though index.html itself remains untouched.
       .then(() => self.clients.matchAll({ type: 'window', includeUncontrolled: true }))
-      .then(clients => Promise.all(clients.map(client =>
-        client.navigate(client.url).catch(() => null)
-      )))
+      .then(clients => Promise.all(clients.map(client => client.navigate(client.url).catch(() => null))))
   );
 });
 
 self.addEventListener('fetch', event => {
   const request = event.request;
   if (request.method !== 'GET') return;
-
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
 
   if (request.mode === 'navigate') {
     event.respondWith(
       fetch(request)
-        .then(injectAiV2)
+        .then(injectRuntime)
         .then(response => {
           const copy = response.clone();
           caches.open(CACHE_NAME).then(cache => {
