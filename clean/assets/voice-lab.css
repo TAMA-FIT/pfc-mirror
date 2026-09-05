@@ -1,0 +1,6 @@
+.voice-lab-card{margin:12px 0 14px;padding:12px;border:1px solid #cfe8dc;border-radius:14px;background:#f7fcf9;box-shadow:0 4px 14px rgba(24,122,81,.06)}
+.vl-head{display:flex;align-items:flex-start;justify-content:space-between;gap:8px}.vl-head b{font-size:13px;color:#176c49}.vl-head small{display:block;margin-top:2px;color:#62776d;font-size:10px;line-height:1.35}.vl-head>span{font-size:11px;color:#638176;background:#e6f5ed;border-radius:999px;padding:3px 8px;white-space:nowrap}
+.vl-now{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-top:10px}.vl-now>div{background:#fff;border:1px solid #e1eee8;border-radius:10px;padding:7px 4px;text-align:center}.vl-now small{display:block;font-size:9px;color:#74847d}.vl-now strong{display:block;margin-top:2px;font-size:12px;color:#173c2e}
+.vl-avg{margin-top:8px;font-size:10px;color:#5b6f66;line-height:1.5}.vl-rate{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:8px}.vl-rate span{font-size:10px;color:#52675e;margin-right:auto}.vl-rate button{border:1px solid #bcdcca;background:white;color:#176c49;border-radius:8px;padding:5px 8px;font-size:10px;font-weight:700}.vl-rate .vl-clear{color:#66756f;border-color:#d9e3de;font-weight:500}
+.mode-tabs .voice-mode small{font-size:9px;line-height:1.25}
+@media(max-width:390px){.vl-now{grid-template-columns:repeat(2,1fr)}}
