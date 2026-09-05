@@ -4,7 +4,7 @@ import { buildRecord, recalcRecord, totals, formatAmount, scaleFood } from './nu
 import { parseMealTurn, optimisticDraft, trainerReply, AI_INFO } from './ai/client.js';
 import { VoiceInput, speak } from './voice/input.js';
 
-const VERSION='CLEAN 1.1';
+const VERSION='CLEAN 1.3 VOICE LAB';
 const state=readState();
 archiveIfDayChanged(state);
 const ui={view:'home', voiceOpen:false, manualOpen:false, manualFood:null, memo:[], question:'', transcript:'', interim:'', aiBusy:false, voiceState:'idle', editId:null, fixPulse:false};

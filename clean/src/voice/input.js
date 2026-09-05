@@ -91,8 +91,8 @@ class MicPcm16 {
 }
 
 class AudioPlayer {
-  constructor(onFirst){this.onFirst=onFirst;this.ctx=null;this.next=0;this.first=false;this.pending=0;this.onDrained=null;}
-  reset(){this.first=false;this.pending=0;this.onDrained=null;this.next=Math.max(this.ctx?.currentTime||0,0)}
+  constructor(onFirst,onDrained){this.onFirst=onFirst;this.onDrained=onDrained;this.ctx=null;this.next=0;this.first=false;this.pending=0;}
+  reset(){this.first=false;this.pending=0;this.next=Math.max(this.ctx?.currentTime||0,0)}
   async play(b64){
     const AC=globalThis.AudioContext||globalThis.webkitAudioContext;if(!this.ctx)this.ctx=new AC();if(this.ctx.state==='suspended')await this.ctx.resume();
     const pcm=base64ToInt16(b64),buf=this.ctx.createBuffer(1,pcm.length,24000),ch=buf.getChannelData(0);for(let i=0;i<pcm.length;i++)ch[i]=pcm[i]/32768;
@@ -144,7 +144,7 @@ class Profile {
 export class VoiceInput {
   constructor({onText,onInterim,onState,onError,onUtterance}={}){
     this.onText=onText||(()=>{});this.onInterim=onInterim||(()=>{});this.onState=onState||(()=>{});this.onError=onError||(()=>{});this.onUtterance=onUtterance||(()=>{});
-    this.active=false;this.processing=false;this.mode='voice';this.transcript='';this.interim='';this.transcribe=null;this.conversation=null;this.convKind='';this.mic=null;this.profile=null;this.liveResult=null;this.emitted=false;this.pendingSpeakEnd=null;this.preparePromise=null;this.player=new AudioPlayer(t=>this._firstAudio(t));activeInstance=this;this._installBridge();
+    this.active=false;this.processing=false;this.mode='voice';this.transcript='';this.interim='';this.transcribe=null;this.conversation=null;this.convKind='';this.mic=null;this.profile=null;this.liveResult=null;this.emitted=false;this.pendingSpeakEnd=null;this.serverTurnComplete=false;this.preparePromise=null;this.player=new AudioPlayer(t=>this._firstAudio(t),()=>this._audioDrained());activeInstance=this;this._installBridge();
   }
   _installBridge(){
     const self=this;
@@ -168,27 +168,29 @@ export class VoiceInput {
   _ready(mode){return mode==='voice'?!!this.conversation?.ready:!!this.transcribe?.ready&&!!this.conversation?.ready}
   async _connect(profile,setup,kind){const s=new LiveWs(profile,setup,m=>kind==='transcribe'?this._onTranscribe(m):this._onConversation(m,kind),e=>this._socketError(e));await s.connect();return s}
   async start({clear=true}={}){
-    if(!this.supported()){this.onError('unsupported');return false}if(this.active)return true;if(clear)this.resetBuffer();this.mode=currentMode();this.profile=new Profile(this.mode);this.liveResult=null;this.emitted=false;this.processing=false;this.player.reset();
+    if(!this.supported()){this.onError('unsupported');return false}if(this.active)return true;if(clear)this.resetBuffer();this.mode=currentMode();this.profile=new Profile(this.mode);this.liveResult=null;this.emitted=false;this.processing=false;this.pendingSpeakEnd=null;this.serverTurnComplete=false;this.player.reset();
     try{await this._prepare(this.mode);this.mic=new MicPcm16(b64=>{if(this.mode==='voice')this.conversation?.audio(b64);else this.transcribe?.audio(b64)},t=>this.profile?.voice(t),e=>this._turnError(e));await this.mic.start();this.active=true;this.onState('listening');return true}catch(e){this._turnError(e);return false}
   }
   commitNow(){if(!this.active)return '';this.profile?.mark('micStop');this.mic?.stop();this.mic=null;this.active=false;this.processing=true;if(this.mode==='voice')this.conversation?.audioEnd();else this.transcribe?.audioEnd();this.onState('processing');return this.getText()}
-  stop(manual=true,emitState=true){if(this.active){this.mic?.stop();this.mic=null;this.active=false}this.processing=false;if(emitState)this.onState('idle')}
-  finishProcessing(){this.processing=false;if(!this.active&&this.player.pending===0)this.onState('ready')}
+  stop(manual=true,emitState=true){if(this.active){this.mic?.stop();this.mic=null;this.active=false}this.processing=false;this.pendingSpeakEnd=null;this.serverTurnComplete=false;if(emitState)this.onState('idle')}
+  finishProcessing(){this.processing=false;this._flushPendingSpeakEnd();if(!this.active&&this.player.pending===0&&!this.pendingSpeakEnd)this.onState('ready')}
   _stopMicSilently(){if(!this.active)return;this.profile?.mark('micStop');this.mic?.stop();this.mic=null;this.active=false}
-  _onTranscribe(msg){const c=msg.serverContent;if(c?.interimInputTranscription?.text){this.interim=clean(c.interimInputTranscription.text);this.onInterim(this.interim,this.transcript)}if(c?.inputTranscription?.text){const text=clean(c.inputTranscription.text);if(!text)return;this.transcript=text;this.interim='';this.profile&&(this.profile.transcript=text,this.profile.mark('transcriptFinal'));this.onText(text,text);this._stopMicSilently();if(this.mode==='chat'){this.profile?.mark('brainStart');this.conversation?.text(text);this.onState('thinking')}else if(this.mode==='auto'){this.profile?.mark('brainStart');this.processing=true;this.onState('thinking');queueMicrotask(()=>this.onUtterance(text,'transcribe-live'))}}}
+  _onTranscribe(msg){const c=msg.serverContent;if(c?.interimInputTranscription?.text){this.interim=clean(c.interimInputTranscription.text);this.onInterim(this.interim,this.transcript)}if(c?.inputTranscription?.text){const text=clean(c.inputTranscription.text);if(!text)return;this.transcript=text;this.interim='';this.profile&&(this.profile.transcript=text,this.profile.mark('transcriptFinal'));this.onText(text,text);this._stopMicSilently();if(this.mode==='chat'){this.profile?.mark('brainStart');this.serverTurnComplete=false;this.conversation?.text(text);this.onState('thinking')}else if(this.mode==='auto'){this.profile?.mark('brainStart');this.processing=true;this.onState('thinking');queueMicrotask(()=>this.onUtterance(text,'transcribe-live'))}}}
   _onConversation(msg,kind){const p=this.profile,c=msg.serverContent;if(this.mode==='voice'&&c?.inputTranscription?.text){const text=clean(c.inputTranscription.text);if(text){this.transcript=text;p&&(p.transcript=text,p.mark('transcriptFinal'),p.mark('brainStart'));this.onText(text,text);this._maybeEmitLive()}}
-    if(msg.toolCall?.functionCalls?.length&&kind==='agent'){p?.mark('brainDone');let items=[],question='';const responses=[];for(const fc of msg.toolCall.functionCalls){if(fc.name==='update_meal_memo'){items=normalizeMealItems(fc.args?.items,[]);question=clean(fc.args?.question);if(!question&&items.some(x=>x.needsAmount))question='量が必要な食品は何グラムでしたか？';responses.push({name:fc.name,id:fc.id,response:{result:{accepted:true,ready:items.length>0&&!items.some(x=>x.unresolved||x.needsAmount),question}}})}else responses.push({name:fc.name,id:fc.id,response:{result:{accepted:false}}})}this.liveResult={mode:this.mode,items,question};p?.mark('memoReady');p?.mark('mouthStart');this.conversation?.tool(responses);this._maybeEmitLive()}
+    if(msg.toolCall?.functionCalls?.length&&kind==='agent'){p?.mark('brainDone');let items=[],question='';const responses=[];for(const fc of msg.toolCall.functionCalls){if(fc.name==='update_meal_memo'){items=normalizeMealItems(fc.args?.items,[]);question=clean(fc.args?.question);if(!question&&items.some(x=>x.needsAmount))question='量が必要な食品は何グラムでしたか？';responses.push({name:fc.name,id:fc.id,response:{result:{accepted:true,ready:items.length>0&&!items.some(x=>x.unresolved||x.needsAmount),question}}})}else responses.push({name:fc.name,id:fc.id,response:{result:{accepted:false}}})}this.liveResult={mode:this.mode,items,question};if(question&&this.mode==='voice')this.pendingSpeakEnd=()=>this.start({clear:true});p?.mark('memoReady');p?.mark('mouthStart');this.conversation?.tool(responses);this._maybeEmitLive()}
     if(c?.modelTurn?.parts){for(const part of c.modelTurn.parts){if(part.inlineData?.data){this._stopMicSilently();this.onState('speaking');this.player.play(part.inlineData.data)}}}
-    if(c?.turnComplete){p?.mark('turnDone');this._finishBench(true);const cb=this.pendingSpeakEnd;this.pendingSpeakEnd=null;if(cb)setTimeout(cb,0);this.onState('ready')}
+    if(c?.turnComplete){this.serverTurnComplete=true;p?.mark('turnDone');this._finishBench(true);this._flushPendingSpeakEnd()}
   }
   _maybeEmitLive(){if(this.emitted||!this.liveResult)return;const text=clean(this.transcript);if(!text&&this.mode==='voice')return;this.emitted=true;this.processing=true;queueMicrotask(()=>this.onUtterance(text||'Live音声入力','conversation-live'))}
   _firstAudio(t){this.profile?.mark('firstAudio',t);this.onState('speaking')}
+  _audioDrained(){this._flushPendingSpeakEnd()}
+  _flushPendingSpeakEnd(){if(!this.serverTurnComplete||this.player.pending>0)return;if(this.processing){setTimeout(()=>this._flushPendingSpeakEnd(),40);return}const cb=this.pendingSpeakEnd;this.pendingSpeakEnd=null;this.serverTurnComplete=false;if(cb)setTimeout(cb,0);else if(!this.active)this.onState('ready')}
   _finishBench(ok,error=null){const s=this.profile?.finish(ok,error);if(s)this.profile=null}
-  _turnError(e){console.warn('[Voice Lab]',e);this._stopMicSilently();this._finishBench(false,e?.message||e);this.processing=false;this.onState('idle');this.onError(e?.name==='NotAllowedError'?'permission-denied':e?.message||String(e))}
+  _turnError(e){console.warn('[Voice Lab]',e);this._stopMicSilently();this._finishBench(false,e?.message||e);this.processing=false;this.pendingSpeakEnd=null;this.serverTurnComplete=false;this.onState('idle');this.onError(e?.name==='NotAllowedError'?'permission-denied':e?.message||String(e))}
   _socketError(e){console.warn('[Voice Lab socket]',e);if(this.profile)this._turnError(e);else this.onError(e?.message||String(e))}
   _closeSockets(){this.transcribe?.close();this.conversation?.close();this.transcribe=null;this.conversation=null;this.convKind=''}
-  async _speakC(text,onEnd){try{if(this.mode!=='auto'){onEnd?.();return}await this._prepare('auto');this.profile?.mark('mouthStart');this.pendingSpeakEnd=onEnd||this.pendingSpeakEnd;this.onState('speaking');this.conversation?.text(text)}catch(e){this._turnError(e);onEnd?.()}}
-  speak(text,onEnd){if(!text){onEnd?.();return}if(this.mode==='chat'){this.pendingSpeakEnd=onEnd||this.pendingSpeakEnd;return}if(this.mode==='auto'){this._speakC(text,onEnd);return}onEnd?.()}
+  async _speakC(text,onEnd){try{if(this.mode!=='auto'){onEnd?.();return}await this._prepare('auto');this.serverTurnComplete=false;this.profile?.mark('mouthStart');this.pendingSpeakEnd=onEnd||this.pendingSpeakEnd;this.onState('speaking');this.conversation?.text(text)}catch(e){this._turnError(e);onEnd?.()}}
+  speak(text,onEnd){if(!text){onEnd?.();return}if(this.mode==='chat'){this.pendingSpeakEnd=onEnd||this.pendingSpeakEnd;this._flushPendingSpeakEnd();return}if(this.mode==='auto'){this._speakC(text,onEnd);return}onEnd?.()}
   close(){this.stop();this._closeSockets();this.player.close();if(activeInstance===this)activeInstance=null}
 }
 
