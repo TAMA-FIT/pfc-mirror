@@ -51,14 +51,14 @@ export function formatAmount(amount, unit) {
   return `${v}${unit || ''}`;
 }
 
-export function buildRecord({ food, foodId, query, amount, unit, meal, id }) {
-  const resolved = food || getFood(foodId) || resolveFood(query);
+function createRecord(resolved, amount, unit, meal, id) {
   if (!resolved) return null;
   const fallback = defaultAmount(resolved);
   const finalAmount = Number(amount) > 0 ? Number(amount) : fallback.amount;
   const finalUnit = String(unit || fallback.unit);
   const nutrition = scaleFood(resolved, finalAmount, finalUnit);
   if (!nutrition) return null;
+
   return {
     id: Number(id) || Date.now(),
     N: `${resolved.name}(${formatAmount(finalAmount, finalUnit)})`,
@@ -70,8 +70,9 @@ export function buildRecord({ food, foodId, query, amount, unit, meal, id }) {
     U: resolved.nutritionBasis.raw,
     time: ['朝','昼','晩','間食'].includes(meal) ? meal : autoMeal(),
     _clean: {
-      schema: 1,
+      schema: 2,
       foodId: resolved.id,
+      foodIndex: resolved.index,
       amount: finalAmount,
       unit: finalUnit,
       nutritionSource: resolved.source.kind === 'mext' ? 'MEXT Food Master' : 'Food Master'
@@ -79,21 +80,63 @@ export function buildRecord({ food, foodId, query, amount, unit, meal, id }) {
   };
 }
 
+// Recovered V6 contract in Clean form:
+// trusted food ID/index first, deterministic Food Master calculation second.
+export function buildTrustedRecord(foodIdOrIndex, amount, unit, meal, id) {
+  const food = getFood(foodIdOrIndex);
+  if (!food) return null;
+  const record = createRecord(food, amount, unit, meal, id);
+  return validateTrustedRecord(record).ok ? record : null;
+}
+
+export function validateTrustedRecord(record) {
+  const foodId = record?._clean?.foodId;
+  const foodIndex = Number(record?._clean?.foodIndex);
+  const food = getFood(foodId) || (Number.isFinite(foodIndex) ? getFood(foodIndex) : null);
+  if (!food) return { ok:false, reason:'unknown-food-id' };
+
+  const amount = Number(record?._clean?.amount);
+  const unit = String(record?._clean?.unit || '');
+  if (!(amount > 0) || !unit) return { ok:false, reason:'invalid-amount' };
+
+  const expected = scaleFood(food, amount, unit);
+  if (!expected) return { ok:false, reason:'invalid-unit' };
+
+  const close = (a, b, tolerance = 0.11) => Math.abs(Number(a || 0) - Number(b || 0)) <= tolerance;
+  if (!close(record.P, expected.p) ||
+      !close(record.F, expected.f) ||
+      !close(record.C, expected.c) ||
+      !close(record.A, expected.a) ||
+      Math.abs(Number(record.Cal || 0) - Number(expected.kcal || 0)) > 1) {
+    return { ok:false, reason:'nutrition-mismatch' };
+  }
+
+  return { ok:true, foodId:food.id, index:food.index };
+}
+
+export function buildRecord({ food, foodId, query, amount, unit, meal, id }) {
+  const resolved = food || getFood(foodId) || resolveFood(query);
+  if (!resolved) return null;
+  const record = createRecord(resolved, amount, unit, meal, id);
+  return validateTrustedRecord(record).ok ? record : null;
+}
+
 export function recalcRecord(record, amount, unit) {
   const foodId = record?._clean?.foodId || record?._dbv3?.id;
   let food = getFood(foodId);
   if (!food) {
-    const stripped = String(record?.N || '').replace(/\([^)]*\)\s*$/, '').replace(/^🤖\s*/, '').trim();
+    const stripped = String(record?.N || '').replace(/\([^)]*\)\s*$/,'').replace(/^🤖\s*/,'').trim();
     food = resolveFood(stripped);
   }
   if (!food) return null;
-  return buildRecord({
+  const next = createRecord(
     food,
-    amount: Number(amount) > 0 ? Number(amount) : record?._clean?.amount || record?._dbv3?.amount || defaultAmount(food).amount,
-    unit: unit || record?._clean?.unit || record?._dbv3?.unit || defaultAmount(food).unit,
-    meal: record.time,
-    id: record.id
-  });
+    Number(amount) > 0 ? Number(amount) : record?._clean?.amount || record?._dbv3?.amount || defaultAmount(food).amount,
+    unit || record?._clean?.unit || record?._dbv3?.unit || defaultAmount(food).unit,
+    record.time,
+    record.id
+  );
+  return validateTrustedRecord(next).ok ? next : null;
 }
 
 export function totals(records) {
