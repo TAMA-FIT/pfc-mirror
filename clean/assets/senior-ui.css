@@ -1,4 +1,4 @@
-/* v1.5.0 — senior-friendly interaction and typography layer.
+/* v1.5.1 — senior-friendly interaction and typography layer.
    Keep form fields selectable, but prevent accidental text-selection/callout on app chrome. */
 html,body{font-size:17px;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{-webkit-tap-highlight-color:transparent}
@@ -38,7 +38,17 @@ input,textarea,select{font-size:16px;line-height:1.45}
 .sv4-empty{font-size:16px;line-height:1.6}.sv4-food-name{font-size:19px;line-height:1.35}.sv4-food-meta{font-size:14px;line-height:1.45}.sv4-food-qty{font-size:18px}
 .sv4-text-row input{font-size:16px}.sv4-text-row button,.sv4-actions button{font-size:17px;min-height:52px}
 
+/* v1.5.1 — the user, not a silence timer, decides when speech is submitted. */
+.sv4-input-controls{display:grid;grid-template-columns:minmax(120px,.88fr) minmax(170px,1.12fr);gap:12px;align-items:stretch}
+.sv4-input-controls .sv4-mic{width:100%;height:auto;min-height:112px;margin:0;border-radius:24px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:12px}
+.sv4-input-controls .sv4-mic .mic-icon{font-size:48px;line-height:1}
+.sv4-input-controls .sv4-mic .mic-label{font-size:15px;font-weight:900;line-height:1.25}
+.sv4-send-voice{min-height:112px;border:0;border-radius:24px;background:linear-gradient(145deg,#218d60,#126d49);color:#fff;box-shadow:0 8px 28px rgba(24,122,81,.22);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;padding:14px;cursor:pointer}
+.sv4-send-voice strong{font-size:27px;line-height:1.1}.sv4-send-voice small{font-size:14px;font-weight:800;line-height:1.35}
+.sv4-send-voice:disabled{background:#c4cfca;color:#f5f7f6;box-shadow:none;cursor:default}
+
 @media (max-width:420px){
   .mode-tabs{gap:5px}.voice-mode{padding:9px 6px}.voice-mode b{font-size:15px}.voice-mode small{font-size:10px}
   .pfc-mini-grid{gap:6px}.macro-card{padding:11px 7px}.macro-name{font-size:11px}.macro-value{font-size:21px}
+  .sv4-input-controls{grid-template-columns:minmax(110px,.82fr) minmax(160px,1.18fr);gap:9px}.sv4-send-voice strong{font-size:25px}.sv4-send-voice small{font-size:13px}
 }
