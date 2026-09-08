@@ -74,6 +74,8 @@ export class VoiceInput {
     this.finalBuffer = '';
     this.interimBuffer = '';
     this.session = 0;
+    this.commitReason = null;
+    this.commitTimer = null;
     activeInstance = this;
     installLifecycle();
   }
@@ -84,6 +86,11 @@ export class VoiceInput {
   resetBuffer() {
     this.finalBuffer = '';
     this.interimBuffer = '';
+  }
+
+  _clearCommitTimer() {
+    clearTimeout(this.commitTimer);
+    this.commitTimer = null;
   }
 
   _abortRecognition() {
@@ -98,6 +105,31 @@ export class VoiceInput {
     try { r.abort(); } catch (_) {
       try { r.stop(); } catch (_) {}
     }
+  }
+
+  _finishCommit(reason = 'manual-send') {
+    this._clearCommitTimer();
+    this.commitReason = null;
+    const text = normalizeSpeechTranscript(this.getText());
+    if (this.processing) return '';
+    if (!text) {
+      this.manualStop = true;
+      this.active = false;
+      this._abortRecognition();
+      this.onState('idle');
+      return '';
+    }
+
+    this.processing = true;
+    this.manualStop = true;
+    this.active = false;
+    this._abortRecognition();
+    this.onState('processing');
+    const session = this.session;
+    queueMicrotask(() => {
+      if (session === this.session) this.onUtterance(text, reason);
+    });
+    return text;
   }
 
   _build(session) {
@@ -123,7 +155,7 @@ export class VoiceInput {
     };
 
     r.onresult = event => {
-      if (session !== this.session || this.processing || !this.active) return;
+      if (session !== this.session || this.processing) return;
       let finalText = '';
       for (let i = event.resultIndex || 0; i < (event.results?.length || 0); i++) {
         const result = event.results[i];
@@ -136,7 +168,7 @@ export class VoiceInput {
       this.finalBuffer = mergeVoiceInput(this.finalBuffer, clean);
       this.interimBuffer = '';
       this.onText(clean, this.finalBuffer);
-      this.onState('listening');
+      this.onState(this.commitReason ? 'finalizing' : 'listening');
     };
 
     r.onerror = event => {
@@ -144,6 +176,13 @@ export class VoiceInput {
       const code = String(event.error || 'unknown');
       if (code === 'aborted') return;
       if (this.recognition === r) this.recognition = null;
+
+      if (this.commitReason) {
+        const reason = this.commitReason;
+        this.active = false;
+        this._finishCommit(reason);
+        return;
+      }
 
       if (code === 'no-speech') {
         this.active = false;
@@ -163,6 +202,13 @@ export class VoiceInput {
       if (session !== this.session || this.processing || this.manualStop) return;
       if (this.recognition === r) this.recognition = null;
       this.active = false;
+
+      if (this.commitReason) {
+        const reason = this.commitReason;
+        this._finishCommit(reason);
+        return;
+      }
+
       // Never submit from onend. Android/Chrome may end recognition after a pause,
       // but the user owns the submit timing in v1.5.1.
       this.onState(this.getText() ? 'ready' : 'idle');
@@ -181,6 +227,7 @@ export class VoiceInput {
     if (clear) this.resetBuffer();
     this.manualStop = false;
     this.processing = false;
+    this.commitReason = null;
     this.active = true;
     const session = ++this.session;
     const r = this._build(session);
@@ -199,7 +246,7 @@ export class VoiceInput {
   }
 
   pause() {
-    if (this.processing) return;
+    if (this.processing || this.commitReason) return;
     this.manualStop = true;
     this.active = false;
     this.session += 1;
@@ -208,29 +255,32 @@ export class VoiceInput {
   }
 
   commitNow(reason = 'manual-send') {
-    const text = normalizeSpeechTranscript(this.getText());
-    if (this.processing) return '';
-    if (!text) {
-      this.pause();
-      return '';
+    if (this.processing || this.commitReason) return this.getText();
+
+    // If recognition is still running, request a graceful stop first. Chrome may
+    // emit the last final result only during stop/onend; aborting immediately can
+    // drop the last few words the user just spoke.
+    if (this.active && this.recognition) {
+      this.commitReason = reason;
+      this.onState('finalizing');
+      try {
+        this.recognition.stop();
+        this.commitTimer = setTimeout(() => this._finishCommit(reason), 2500);
+        return this.getText();
+      } catch (_) {
+        this.commitReason = null;
+      }
     }
 
-    this.processing = true;
-    this.manualStop = true;
-    this.active = false;
-    this._abortRecognition();
-    this.onState('processing');
-    const session = this.session;
-    queueMicrotask(() => {
-      if (session === this.session) this.onUtterance(text, reason);
-    });
-    return text;
+    return this._finishCommit(reason);
   }
 
   finishProcessing() {
     this.processing = false;
     this.manualStop = true;
     this.active = false;
+    this.commitReason = null;
+    this._clearCommitTimer();
     this._abortRecognition();
     this.resetBuffer();
     this.onState('idle');
@@ -240,9 +290,12 @@ export class VoiceInput {
     this.manualStop = manual;
     this.active = false;
     this.processing = false;
+    this.commitReason = null;
+    this._clearCommitTimer();
     this.session += 1;
     this._abortRecognition();
     cancelSpeech();
+    if (manual) this.resetBuffer();
     if (emitState) this.onState(this.getText() ? 'ready' : 'idle');
   }
 }
@@ -303,6 +356,7 @@ export const VOICE_INFO = Object.freeze({
   autoRestartOnEnd: false,
   interimResults: false,
   manualSubmit: true,
+  gracefulFinalBeforeSubmit: true,
   autoSubmitOnPause: false,
   liveApi: false
 });
