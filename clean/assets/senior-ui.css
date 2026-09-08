@@ -1,0 +1,44 @@
+/* v1.5.0 — senior-friendly interaction and typography layer.
+   Keep form fields selectable, but prevent accidental text-selection/callout on app chrome. */
+html,body{font-size:17px;-webkit-text-size-adjust:100%;text-size-adjust:100%}
+body{-webkit-tap-highlight-color:transparent}
+body :not(input):not(textarea):not([contenteditable="true"]){-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+button,[role="button"],[data-action],[data-view],[data-mode],summary,label{touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+button:focus:not(:focus-visible),[role="button"]:focus:not(:focus-visible){outline:none}
+input,textarea,select{font-size:16px;line-height:1.45}
+
+/* Readability: enlarge the smallest labels without changing the overall card geometry. */
+.header h1{font-size:21px}
+.app-build-version{font-size:12px;padding:5px 9px}
+.section-title h1{font-size:25px}
+.section-title p{font-size:15px;line-height:1.55}
+.tgt-label{font-size:14px}.tgt-value{font-size:17px}
+.dash-t{font-size:18px}.dash-target{font-size:13px}
+.cal-caption{font-size:14px}.cal-sub{font-size:13px;line-height:1.35}
+.cal-value small,.cal-rem small{font-size:14px}
+.macro-name{font-size:12px;line-height:1.25}.macro-value{font-size:23px}.macro-value small{font-size:12px}.macro-goal{font-size:12px}.macro-cal-pill{font-size:11px}
+.senior-pfc-legend{font-size:15px;line-height:1.65}
+.senior-talk-btn small{font-size:15px;line-height:1.4}.senior-fix-btn small{font-size:14px;line-height:1.4}.senior-manual-link{font-size:15px;min-height:44px}
+.section-head h2{font-size:21px}.section-head span{font-size:13px}
+.empty-card{font-size:16px}
+.record-main strong{font-size:18px;line-height:1.35}.record-main span{font-size:14px}.record-main>b{font-size:16px}.record-macros{font-size:14px;line-height:1.55}
+.ghost-btn,.text-btn{font-size:15px;min-height:44px}
+.chat-line{font-size:16px;line-height:1.6}.chat-compose button{font-size:16px;min-width:64px}
+.history-day>div:nth-child(2),.history-day summary{font-size:15px}.history-items>div{font-size:14px}
+.body-form label,.settings-grid label,.manual-form label,.form-row label{font-size:14px}.body-row{font-size:14px}
+.backup-panel p,.runtime-panel p{font-size:14px;line-height:1.7}
+.primary-btn,.secondary-btn{font-size:16px;min-height:48px}
+.nav-btn{font-size:12px;min-height:58px}.nav-btn span{font-size:21px}
+.sv4-header strong{font-size:22px}
+.voice-mode{min-height:72px;padding:10px 8px}.voice-mode b{font-size:16px;line-height:1.25}.voice-mode small{font-size:11px;line-height:1.4}
+.sv4-prompt{font-size:20px;line-height:1.5}.sv4-prompt small{font-size:14px;line-height:1.5}
+.sv4-listen-status{font-size:16px;line-height:1.45;min-height:24px}
+.sv4-last{font-size:15px;line-height:1.5}
+.sv4-memo-head strong{font-size:18px}.sv4-memo-head span{font-size:13px}
+.sv4-empty{font-size:16px;line-height:1.6}.sv4-food-name{font-size:19px;line-height:1.35}.sv4-food-meta{font-size:14px;line-height:1.45}.sv4-food-qty{font-size:18px}
+.sv4-text-row input{font-size:16px}.sv4-text-row button,.sv4-actions button{font-size:17px;min-height:52px}
+
+@media (max-width:420px){
+  .mode-tabs{gap:5px}.voice-mode{padding:9px 6px}.voice-mode b{font-size:15px}.voice-mode small{font-size:10px}
+  .pfc-mini-grid{gap:6px}.macro-card{padding:11px 7px}.macro-name{font-size:11px}.macro-value{font-size:21px}
+}
