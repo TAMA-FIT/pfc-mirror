@@ -1,8 +1,6 @@
 let activeInstance = null;
 let lifecycleInstalled = false;
 
-const CONTINUATION_GRACE_MS = 2800;
-
 function cancelSpeech() {
   try { globalThis.speechSynthesis?.cancel(); } catch (_) {}
 }
@@ -76,7 +74,6 @@ export class VoiceInput {
     this.finalBuffer = '';
     this.interimBuffer = '';
     this.session = 0;
-    this.finalizeTimer = null;
     activeInstance = this;
     installLifecycle();
   }
@@ -87,11 +84,6 @@ export class VoiceInput {
   resetBuffer() {
     this.finalBuffer = '';
     this.interimBuffer = '';
-  }
-
-  _clearFinalizeTimer() {
-    clearTimeout(this.finalizeTimer);
-    this.finalizeTimer = null;
   }
 
   _abortRecognition() {
@@ -108,30 +100,15 @@ export class VoiceInput {
     }
   }
 
-  _scheduleFinalize(session) {
-    this._clearFinalizeTimer();
-    if (session !== this.session || !this.active || this.processing || !this.getText()) return;
-    this.finalizeTimer = setTimeout(() => {
-      if (session === this.session && this.active && !this.processing) {
-        this.commitNow('pause-grace');
-      }
-    }, CONTINUATION_GRACE_MS);
-  }
-
   _build(session) {
     const r = new this.Recognition();
     r.lang = 'ja-JP';
-
-    // One microphone session per user turn. continuous=true only keeps the same
-    // Android recognition session alive across short thinking pauses; unlike the
-    // old unstable implementation, onend never auto-restarts another recognizer.
     r.continuous = true;
     r.interimResults = false;
     r.maxAlternatives = 1;
 
     r.onspeechstart = () => {
       if (session !== this.session || this.processing || !this.active) return;
-      this._clearFinalizeTimer();
       this.onState('listening');
     };
 
@@ -159,7 +136,7 @@ export class VoiceInput {
       this.finalBuffer = mergeVoiceInput(this.finalBuffer, clean);
       this.interimBuffer = '';
       this.onText(clean, this.finalBuffer);
-      this._scheduleFinalize(session);
+      this.onState('listening');
     };
 
     r.onerror = event => {
@@ -169,35 +146,26 @@ export class VoiceInput {
       if (this.recognition === r) this.recognition = null;
 
       if (code === 'no-speech') {
-        if (this.getText()) this._scheduleFinalize(session);
-        else {
-          this.active = false;
-          this.onState('idle');
-        }
+        this.active = false;
+        this.onState(this.getText() ? 'ready' : 'idle');
         return;
       }
 
       this.active = false;
-      this._clearFinalizeTimer();
       if (code === 'not-allowed' || code === 'service-not-allowed') {
         try { localStorage.removeItem('tf_mic_permission_ready'); } catch (_) {}
       }
-      this.onState('idle');
+      this.onState(this.getText() ? 'ready' : 'idle');
       this.onError(code);
     };
 
     r.onend = () => {
       if (session !== this.session || this.processing || this.manualStop) return;
       if (this.recognition === r) this.recognition = null;
-      // Never auto-restart here. That restart loop caused Android mic chimes and
-      // duplicated finals. If we already have text, simply let the grace timer
-      // commit it; otherwise return to idle.
-      if (this.getText()) {
-        this._scheduleFinalize(session);
-      } else {
-        this.active = false;
-        this.onState('idle');
-      }
+      this.active = false;
+      // Never submit from onend. Android/Chrome may end recognition after a pause,
+      // but the user owns the submit timing in v1.5.1.
+      this.onState(this.getText() ? 'ready' : 'idle');
     };
 
     return r;
@@ -224,24 +192,32 @@ export class VoiceInput {
     } catch (error) {
       this.active = false;
       this._abortRecognition();
-      this.onState('idle');
+      this.onState(this.getText() ? 'ready' : 'idle');
       this.onError(error?.message || 'start-failed');
       return false;
     }
   }
 
-  commitNow(reason = 'manual') {
+  pause() {
+    if (this.processing) return;
+    this.manualStop = true;
+    this.active = false;
+    this.session += 1;
+    this._abortRecognition();
+    this.onState(this.getText() ? 'ready' : 'idle');
+  }
+
+  commitNow(reason = 'manual-send') {
     const text = normalizeSpeechTranscript(this.getText());
     if (this.processing) return '';
     if (!text) {
-      this.stop(true, true);
+      this.pause();
       return '';
     }
 
     this.processing = true;
     this.manualStop = true;
     this.active = false;
-    this._clearFinalizeTimer();
     this._abortRecognition();
     this.onState('processing');
     const session = this.session;
@@ -255,8 +231,8 @@ export class VoiceInput {
     this.processing = false;
     this.manualStop = true;
     this.active = false;
-    this._clearFinalizeTimer();
     this._abortRecognition();
+    this.resetBuffer();
     this.onState('idle');
   }
 
@@ -264,11 +240,10 @@ export class VoiceInput {
     this.manualStop = manual;
     this.active = false;
     this.processing = false;
-    this._clearFinalizeTimer();
     this.session += 1;
     this._abortRecognition();
     cancelSpeech();
-    if (emitState) this.onState('idle');
+    if (emitState) this.onState(this.getText() ? 'ready' : 'idle');
   }
 }
 
@@ -305,16 +280,11 @@ export function speak(text, onEnd) {
 
     speechSynthesis.speak(u);
 
-    // Android occasionally misses utterance.onend. Use actual synthesis state as
-    // a fallback, never a guessed duration. Therefore the next microphone cannot
-    // start while the AI voice is still speaking.
     watchdog = setInterval(() => {
       if (done || !started) return;
       if (!speechSynthesis.speaking && !speechSynthesis.pending) finish();
     }, 250);
 
-    // Last-resort escape hatch for a genuinely wedged speech engine, not an
-    // estimated speech duration. A normal utterance always completes via onend.
     hardStop = setTimeout(() => {
       if (done) return;
       try { speechSynthesis.cancel(); } catch (_) {}
@@ -326,12 +296,13 @@ export function speak(text, onEnd) {
 }
 
 export const VOICE_INFO = Object.freeze({
-  input: 'Browser SpeechRecognition single-session turn core',
-  source: 'TAMA-FIT/PFC- stable microphone contract + Android turn lifecycle fix',
+  input: 'Browser SpeechRecognition manual-submit turn core',
+  source: 'TAMA-FIT/PFC- stable microphone contract + explicit user commit',
   browserSpeechRecognition: true,
   continuous: true,
   autoRestartOnEnd: false,
   interimResults: false,
-  continuationGraceMs: CONTINUATION_GRACE_MS,
+  manualSubmit: true,
+  autoSubmitOnPause: false,
   liveApi: false
 });
