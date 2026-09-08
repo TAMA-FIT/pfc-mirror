@@ -17,6 +17,9 @@ const SAFE_SERVING_OVERRIDES = Object.freeze({
 
 const CRITICAL_MASS_RE = /(鶏|豚|牛|肉|魚|サバ|アジ|鮭|マグロ|白米|玄米|雑穀|麦ご飯|パスタ|オートミール|さつまいも|じゃがいも)/;
 
+// Explicit product aliases are allowed to be opinionated because they are part of
+// the application contract, not a fuzzy search guess.
+// In particular, plain 「米」 must never resolve to 「米みそ」.
 const QUERY_DEFAULTS = Object.freeze({
   '味噌汁': '味噌汁(豆腐わかめ)',
   'みそ汁': '味噌汁(豆腐わかめ)',
@@ -24,8 +27,17 @@ const QUERY_DEFAULTS = Object.freeze({
   '鶏むね': '鶏むね(皮なし)',
   '鶏胸': '鶏むね(皮なし)',
   '鶏胸肉': '鶏むね(皮なし)',
+  '鶏むね肉': '鶏むね(皮なし)',
+  '鳥胸': '鶏むね(皮なし)',
+  '鳥胸肉': '鶏むね(皮なし)',
+  'とりむね': '鶏むね(皮なし)',
+  'とりむね肉': '鶏むね(皮なし)',
   'ご飯': '白米',
   'ごはん': '白米',
+  '白ご飯': '白米',
+  '白ごはん': '白米',
+  '米': '白米',
+  'ライス': '白米',
   '卵': '全卵(M)',
   'たまご': '全卵(M)'
 });
@@ -141,6 +153,24 @@ const MEXT_ONLY = MEXT_ENTRIES
 
 export const FOODS = Object.freeze([...BASE_FOODS, ...MEXT_ONLY]);
 const BY_ID = new Map(FOODS.map(x => [x.id, x]));
+const BY_NAME = new Map(FOODS.map(x => [normalize(x.name), x]));
+const DEFAULT_BY_QUERY = new Map(
+  Object.entries(QUERY_DEFAULTS).map(([query, name]) => [normalize(query), name])
+);
+
+// Alias strings in the legacy database include intentionally broad tokens such as
+// 「米」「肉」「魚」. They may only auto-resolve when the exact alias belongs to
+// one food. Ambiguous aliases remain unresolved and are left for AI/user confirmation.
+const ALIAS_BUCKETS = new Map();
+for (const food of FOODS) {
+  for (const alias of food.aliases || []) {
+    const key = normalize(alias);
+    if (!key) continue;
+    const bucket = ALIAS_BUCKETS.get(key) || [];
+    if (!bucket.some(x => x.id === food.id)) bucket.push(food);
+    ALIAS_BUCKETS.set(key, bucket);
+  }
+}
 
 export function getFood(idOrIndex) {
   if (typeof idOrIndex === 'number') return FOODS[idOrIndex] || null;
@@ -158,6 +188,8 @@ function score(food, q) {
   return 0;
 }
 
+// Fuzzy search is UI-only. It may offer candidates, but it must never be used as
+// the nutrition truth selector.
 export function searchFoods(query, limit = 12) {
   const q = String(query || '').trim();
   if (!q) return [];
@@ -168,22 +200,29 @@ export function searchFoods(query, limit = 12) {
     .map(x => x.food);
 }
 
+// Trusted automatic resolver.
+// No prefix/substring winner is accepted here. Nutrition is allowed to flow only
+// after an explicit app alias, exact canonical name, or unique exact DB alias.
 export function resolveFood(query) {
-  const preferredName = QUERY_DEFAULTS[String(query || '').trim()];
+  const key = normalize(query);
+  if (!key) return null;
+
+  const preferredName = DEFAULT_BY_QUERY.get(key);
   if (preferredName) {
-    const preferred = FOODS.find(x => x.name === preferredName);
+    const preferred = BY_NAME.get(normalize(preferredName));
     if (preferred) return preferred;
   }
-  const hits = searchFoods(query, 5);
-  if (!hits.length) return null;
-  const nq = normalize(query);
-  const exact = hits.find(x => normalize(x.name) === nq);
+
+  const exact = BY_NAME.get(key);
   if (exact) return exact;
-  if (hits.length === 1) return hits[0];
-  const first = hits[0], second = hits[1];
-  const firstScore = score(first, query), secondScore = score(second, query);
-  return firstScore >= 500 && firstScore - secondScore >= 200 ? first : null;
+
+  const aliases = ALIAS_BUCKETS.get(key) || [];
+  if (aliases.length === 1) return aliases[0];
+
+  return null;
 }
+
+export const resolveTrustedFood = resolveFood;
 
 export function defaultAmount(food) {
   return { amount: food?.defaultAmount || 1, unit: food?.defaultUnit || '食' };
@@ -204,5 +243,5 @@ export function amountChoices(food) {
 }
 
 export function catalogInfo() {
-  return { foods: FOODS.length, ...FOOD_DATA_META };
+  return { foods: FOODS.length, ...FOOD_DATA_META, resolver: 'trusted-exact-v2' };
 }

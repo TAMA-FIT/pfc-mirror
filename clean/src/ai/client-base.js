@@ -1,4 +1,4 @@
-import { FOODS, resolveFood, searchFoods, defaultAmount } from '../nutrition/catalog.js';
+import { resolveFood, defaultAmount } from '../nutrition/catalog.js';
 import { autoMeal } from '../storage.js';
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxRNfeijUEwXwoFgBYbS60S5zn2fcuqHSm4TAbRePUzjTjqInXu10ZmK4cUvxoJ-dCAxw/exec';
@@ -37,22 +37,21 @@ async function gas(prompt, taskType='voice', timeoutMs=25000) {
 }
 
 function normalizeName(name) {
-  const raw = String(name || '').trim();
-  const aliases = [
-    [/鶏胸肉|鳥胸肉|とりむね肉|鶏むね肉/g,'鶏むね'],
-    [/ご飯|ごはん|米飯/g,'白米'],
-    [/みそ汁/g,'味噌汁']
-  ];
-  return aliases.reduce((s,[re,v]) => s.replace(re,v), raw);
+  const raw = String(name || '').normalize('NFKC').trim();
+  const exact = new Map([
+    ['米','白米'], ['ライス','白米'], ['ご飯','白米'], ['ごはん','白米'], ['白ご飯','白米'], ['白ごはん','白米'],
+    ['鶏胸','鶏むね'], ['鳥胸','鶏むね'], ['鶏胸肉','鶏むね'], ['鳥胸肉','鶏むね'], ['とりむね','鶏むね'], ['とりむね肉','鶏むね'],
+    ['みそ汁','味噌汁'], ['みそしる','味噌汁']
+  ]);
+  if (exact.has(raw)) return exact.get(raw);
+  return raw
+    .replace(/鶏胸肉|鳥胸肉|とりむね肉|鶏むね肉/g,'鶏むね')
+    .replace(/米飯/g,'白米')
+    .replace(/みそ汁/g,'味噌汁');
 }
 
 function resolveCandidate(name) {
-  const n = normalizeName(name);
-  let food = resolveFood(n);
-  if (!food && n === '鶏むね') {
-    food = resolveFood('鶏むね(皮なし)');
-  }
-  return food;
+  return resolveFood(normalizeName(name));
 }
 
 function itemFromAi(x, fallbackMeal) {
@@ -88,8 +87,20 @@ function itemFromAi(x, fallbackMeal) {
 }
 
 function prompt(text, current, mode) {
-  const compact = (current || []).map(x => ({ name:x.name, amount:x.amount, unit:x.unit, meal:x.meal, unresolved:x.unresolved, needsAmount:x.needsAmount }));
-  return `あなたは食事記録アプリの会話メモ整理エンジンです。栄養値は生成しません。食品名・量・単位・食事区分だけを整理してください。
+  const compact = (current || []).map(x => ({
+    name:x.name, amount:x.amount, unit:x.unit, meal:x.meal,
+    foodId:x.foodId || null, unresolved:x.unresolved, needsAmount:x.needsAmount
+  }));
+  return `あなたは食事記録アプリの「自然言語理解」だけを担当します。栄養値は絶対に生成・推定しません。
+食品名・量・単位・食事区分だけを整理してください。最終的なPFC/kcalはアプリ内Food Masterが食品IDから機械計算します。
+
+重要:
+- 食品名を勝手に別の食品へ置き換えない。
+- 曖昧な食品は曖昧なまま返してよい。アプリ側がFood Masterで解決できなければ登録を止める。
+- 「米」「ご飯」「ごはん」「ライス」は食事文脈では「白米」。
+- 「鶏胸」「鶏胸肉」「とりむね」は「鶏むね」。皮の指定がなければアプリ側で「鶏むね(皮なし)」へ解決する。
+- 「みそ汁」は「味噌汁」。
+- p/f/c/kcal等の栄養値は出力しない。
 
 目的: ユーザーが食べた物を「今日の食事メモ」に残し、必要なところだけ聞き返す。
 
@@ -99,7 +110,6 @@ function prompt(text, current, mode) {
 - 納豆、味噌汁、卵、個包装など通常1単位が自然な食品は、量の指定がなければ1パック/1杯/1個などを仮定してよい。
 - 鶏肉・肉・魚・白米・パスタ・オートミールなど量で栄養が大きく変わるものは、量不明のまま残す。勝手にg数を決めない。
 - 「150g」のように食品名を省略した回答は、currentMemoで量が未確定の食品が1つならそこへ適用する。
-- 鶏むねは皮あり/なしが明示されなければ一般的な食事記録として「鶏むね(皮なし)」を候補にしてよい。必要なら後で修正できる。
 - すべての項目を確認しない。聞き返しは登録に必要な重要情報だけ。
 - 食品名を聞き取れたら量未確定でも items に必ず残す。
 - question は次に1つだけ聞く質問。質問不要なら空文字。
@@ -141,7 +151,8 @@ export async function parseMealTurn(text, current = [], mode = 'voice') {
 function phraseCandidates(text) {
   return String(text || '')
     .replace(/[、。,.]/g,'|')
-    .replace(/(?:それと|それから|あと|そして|と|や)/g,'|')
+    .replace(/(?:それと|それから|あと|そして)/g,'|')
+    .replace(/(kg|g|グラム|ml|mL|ミリリットル|杯|個|パック|P|本|枚|切れ|食|人前|皿|袋|缶)\s*(?:と|や)\s*/gi,'$1|')
     .split('|')
     .map(x => x.trim())
     .filter(Boolean);
@@ -162,6 +173,8 @@ function parseSpokenQuantity(raw) {
   return { amount, unit, matched: m[0], nameText: text.replace(m[0], ' ').replace(/\s+/g,' ').trim() };
 }
 
+// Conservative immediate memo. It may only attach a Food Master ID through the
+// trusted exact resolver. Fuzzy search remains manual-UI-only.
 export function optimisticDraft(text, current = []) {
   const parts = phraseCandidates(text);
   const next = current.map(x => ({...x}));
@@ -169,18 +182,7 @@ export function optimisticDraft(text, current = []) {
   for (const part of parts) {
     const qty = parseSpokenQuantity(part);
     const nameText = normalizeName(qty?.nameText || part).replace(/(?:くらい|ぐらい|ほど|位)$/,'').trim();
-    let food = nameText ? resolveCandidate(nameText) : null;
-
-    if (!food && nameText) {
-      const hits = searchFoods(nameText, 4);
-      food = hits[0] || null;
-    }
-    if (!food && nameText) {
-      food = FOODS.find(f => {
-        const simple = f.name.replace(/\([^)]*\)/g,'');
-        return simple.length >= 2 && (nameText.includes(simple) || simple.includes(nameText));
-      }) || null;
-    }
+    const food = nameText ? resolveCandidate(nameText) : null;
 
     if (!food && qty) {
       const pending = next.filter(x => x.needsAmount || x.amount == null);
@@ -192,6 +194,7 @@ export function optimisticDraft(text, current = []) {
       }
       continue;
     }
+
     if (!food) continue;
 
     const existing = next.find(x => x.foodId === food.id || x.name === food.name);
@@ -212,7 +215,7 @@ export function optimisticDraft(text, current = []) {
       amount: hasQty ? qty.amount : (food.criticalAmount ? null : def.amount),
       unit: hasQty ? (qty.unit || def.unit) : def.unit,
       meal: autoMeal(), unresolved:false, needsAmount:!hasQty && food.criticalAmount,
-      assumed: !hasQty && !food.criticalAmount, confidence:0.6, optimistic:true
+      assumed: !hasQty && !food.criticalAmount, confidence:0.85, optimistic:true
     });
   }
   return next;
@@ -225,4 +228,10 @@ export async function trainerReply(text, context) {
   return String(parsed.reply || '').trim();
 }
 
-export const AI_INFO = Object.freeze({ model: MODEL, endpoint: 'GAS', live: false });
+export const AI_INFO = Object.freeze({
+  model: MODEL,
+  endpoint: 'GAS',
+  live: false,
+  nutritionAuthority: 'Food Master ID only',
+  resolver: 'trusted exact'
+});

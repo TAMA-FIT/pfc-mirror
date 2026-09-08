@@ -14,7 +14,7 @@
 </head>
 <body>
 <header class="header">
-  <div class="app-build-version">CLEAN 1.3 STABLE VOICE</div>
+  <div class="app-build-version">CLEAN 1.4 TRUSTED CORE</div>
   <h1>たまフィットPFC</h1>
   <button class="header-refresh" id="reload-btn" title="最新版に更新" aria-label="最新版に更新">↻</button>
 </header>
@@ -35,7 +35,12 @@
 <div id="toast"></div>
 <script src="./clean/assets/base-foods.js"></script>
 <script>globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__ = DB;</script>
-<script type="importmap">{"imports":{"./clean/src/voice/input.js":"./clean/src/voice/input.js?v=stable-voice-1"}}</script>
-<script type="module" src="./clean/src/main.js?v=stable-voice-1"></script>
+<script type="importmap">{"imports":{
+  "./clean/src/voice/input.js":"./clean/src/voice/input.js?v=trusted-core-1",
+  "./clean/src/ai/client-base.js":"./clean/src/ai/client-base.js?v=trusted-core-1",
+  "./clean/src/nutrition/catalog.js":"./clean/src/nutrition/catalog.js?v=trusted-core-1",
+  "./clean/src/nutrition/engine.js":"./clean/src/nutrition/engine.js?v=trusted-core-1"
+}}</script>
+<script type="module" src="./clean/src/main.js?v=trusted-core-1"></script>
 </body>
 </html>
