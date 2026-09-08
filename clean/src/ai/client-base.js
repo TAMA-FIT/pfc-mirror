@@ -1,4 +1,4 @@
-import { resolveFood, defaultAmount } from '../nutrition/catalog.js';
+import { getFood, resolveFood, defaultAmount } from '../nutrition/catalog.js';
 import { autoMeal } from '../storage.js';
 
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbxRNfeijUEwXwoFgBYbS60S5zn2fcuqHSm4TAbRePUzjTjqInXu10ZmK4cUvxoJ-dCAxw/exec';
@@ -136,6 +136,22 @@ function mergeStableKeys(current, incoming) {
 }
 
 export async function parseMealTurn(text, current = [], mode = 'voice') {
+  // If the user was answering the app's single pending amount question, the
+  // trusted local resolver has already applied that number to the known Food ID.
+  // Do not spend a network round trip asking AI to rediscover the same fact.
+  const localFollowUps = (current || []).filter(x => x.localQuantityFollowUp);
+  const allReady = (current || []).length > 0 && (current || []).every(x =>
+    x.foodId && !x.unresolved && !x.needsAmount && Number(x.amount) > 0
+  );
+  if (isQuantityOnlyTurn(text) && localFollowUps.length === 1 && allReady) {
+    return {
+      items: current.map(({ localQuantityFollowUp, ...item }) => item),
+      question: '',
+      reply: '',
+      source: 'local-trusted-quantity-followup'
+    };
+  }
+
   const raw = await gas(prompt(text, current, mode), 'voice');
   const parsed = cleanJson(raw);
   const fallbackMeal = autoMeal();
@@ -173,24 +189,63 @@ function parseSpokenQuantity(raw) {
   return { amount, unit, matched: m[0], nameText: text.replace(m[0], ' ').replace(/\s+/g,' ').trim() };
 }
 
+function parseBareQuantity(raw) {
+  const text = String(raw || '').normalize('NFKC').trim();
+  const m = text.match(/^(\d+(?:\.\d+)?)\s*(?:くらい|ぐらい|ほど|程度)?$/);
+  if (!m) return null;
+  const amount = Number(m[1]);
+  return Number.isFinite(amount) && amount > 0 ? { amount } : null;
+}
+
+function isQuantityOnlyTurn(raw) {
+  if (parseBareQuantity(raw)) return true;
+  const qty = parseSpokenQuantity(raw);
+  return !!qty && !normalizeName(qty.nameText);
+}
+
 // Conservative immediate memo. It may only attach a Food Master ID through the
 // trusted exact resolver. Fuzzy search remains manual-UI-only.
 export function optimisticDraft(text, current = []) {
   const parts = phraseCandidates(text);
-  const next = current.map(x => ({...x}));
+  const next = current.map(x => ({...x, localQuantityFollowUp:false}));
 
   for (const part of parts) {
     const qty = parseSpokenQuantity(part);
+    const bareQty = qty ? null : parseBareQuantity(part);
+    const pending = next.filter(x => x.needsAmount || x.amount == null);
+
+    // Typical follow-up: app asks 「量は？」 and the user simply answers 「200」.
+    // If exactly one Food Master item is awaiting an amount, attach the number
+    // deterministically using that food's known/default unit instead of calling AI.
+    if (bareQty && pending.length === 1) {
+      const target = pending[0];
+      const food = getFood(target.foodId) || resolveCandidate(target.name);
+      const unit = String(target.unit || (food ? defaultAmount(food).unit : '')).trim();
+      if (food && unit) {
+        target.foodId = food.id;
+        target.name = food.name;
+        target.amount = bareQty.amount;
+        target.unit = unit;
+        target.unresolved = false;
+        target.needsAmount = false;
+        target.optimistic = true;
+        target.localQuantityFollowUp = true;
+      }
+      continue;
+    }
+
     const nameText = normalizeName(qty?.nameText || part).replace(/(?:くらい|ぐらい|ほど|位)$/,'').trim();
     const food = nameText ? resolveCandidate(nameText) : null;
 
     if (!food && qty) {
-      const pending = next.filter(x => x.needsAmount || x.amount == null);
       if (pending.length === 1) {
-        pending[0].amount = qty.amount;
-        pending[0].unit = qty.unit || pending[0].unit;
-        pending[0].needsAmount = false;
-        pending[0].optimistic = true;
+        const target = pending[0];
+        const knownFood = getFood(target.foodId) || resolveCandidate(target.name);
+        target.amount = qty.amount;
+        target.unit = qty.unit || target.unit || (knownFood ? defaultAmount(knownFood).unit : '');
+        target.needsAmount = false;
+        target.optimistic = true;
+        target.localQuantityFollowUp = isQuantityOnlyTurn(part);
       }
       continue;
     }
@@ -215,7 +270,8 @@ export function optimisticDraft(text, current = []) {
       amount: hasQty ? qty.amount : (food.criticalAmount ? null : def.amount),
       unit: hasQty ? (qty.unit || def.unit) : def.unit,
       meal: autoMeal(), unresolved:false, needsAmount:!hasQty && food.criticalAmount,
-      assumed: !hasQty && !food.criticalAmount, confidence:0.85, optimistic:true
+      assumed: !hasQty && !food.criticalAmount, confidence:0.85, optimistic:true,
+      localQuantityFollowUp:false
     });
   }
   return next;
