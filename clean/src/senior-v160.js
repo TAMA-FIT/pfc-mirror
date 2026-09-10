@@ -1,12 +1,12 @@
 import { CALORIE_PRESETS, PFC_MODES, calculateTarget, targetLabel } from './features/targets.js';
 import { alcoholUiModel } from './features/alcohol.js';
-import { generateRealisticHistory, generateRealisticBody, isDummyHistoryRow } from './dev/realistic-decoy.js';
 
 const RELEASE = 'v1.6.0';
 const KEYS = Object.freeze({ targets:'tf_tg', records:'tf_dat', history:'tf_hist', body:'tf_body' });
 const managerEnabled = new URL(location.href).searchParams.get('manager') === '1';
 let stagedTarget = null;
 let patchQueued = false;
+let managerToolsPromise = null;
 
 function safeJson(raw, fallback) {
   try { const value = JSON.parse(raw); return value ?? fallback; }
@@ -20,15 +20,16 @@ function readArray(key) {
 
 function readTargets() {
   const value = safeJson(localStorage.getItem(KEYS.targets), {});
+  const mode = PFC_MODES[value?.mode] ? value.mode : 'std';
   return {
+    ...value,
     cal: Math.max(1, Number(value?.cal) || 2000),
     p: Math.max(0, Number(value?.p) || 0),
     f: Math.max(0, Number(value?.f) || 0),
     c: Math.max(0, Number(value?.c) || 0),
     a: Math.max(0, Number(value?.a) || 0),
-    mode: PFC_MODES[value?.mode] ? value.mode : 'std',
-    label: String(value?.label || PFC_MODES[value?.mode]?.label || '標準'),
-    ...value
+    mode,
+    label: String(value?.label || PFC_MODES[mode].label)
   };
 }
 
@@ -39,6 +40,17 @@ function esc(value) {
 function writeTarget(next) {
   const previous = safeJson(localStorage.getItem(KEYS.targets), {});
   localStorage.setItem(KEYS.targets, JSON.stringify({ ...previous, ...next }));
+}
+
+function isDummyHistoryRow(row) {
+  if (row?.isDummy) return true;
+  return Array.isArray(row?.l) && row.l.length > 0 && row.l.every(record => record?.isDummy === true);
+}
+
+async function managerTools() {
+  if (!managerEnabled) throw new Error('Manager Mode is disabled');
+  managerToolsPromise ||= import('./dev/realistic-decoy.js');
+  return managerToolsPromise;
 }
 
 function patchVersion() {
@@ -53,7 +65,8 @@ function patchHome() {
   if (!home || home.hidden) return;
   const target = readTargets();
   const label = home.querySelector('.tgt-value');
-  if (label && label.textContent !== targetLabel(target)) label.textContent = targetLabel(target);
+  const nextLabel = targetLabel(target);
+  if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
 
   const old = home.querySelector('.v160-alcohol-strip');
   const model = alcoholUiModel(readArray(KEYS.records));
@@ -61,8 +74,10 @@ function patchHome() {
   if (old) {
     const grams = old.querySelector('[data-a-grams]');
     const kcal = old.querySelector('[data-a-kcal]');
-    if (grams) grams.textContent = `${model.grams}g`;
-    if (kcal) kcal.textContent = `アルコール由来 約${model.estimatedKcal} kcal相当`;
+    const gramsText = `${model.grams}g`;
+    const kcalText = `アルコール由来 約${model.estimatedKcal} kcal相当`;
+    if (grams && grams.textContent !== gramsText) grams.textContent = gramsText;
+    if (kcal && kcal.textContent !== kcalText) kcal.textContent = kcalText;
     return;
   }
   const grid = home.querySelector('.pfc-mini-grid');
@@ -77,12 +92,17 @@ function patchHistory() {
   const history = readArray(KEYS.history);
   const rows = [{ l: records, s: { A: records.reduce((n,r)=>n+Number(r?.A||0),0) } }, ...history];
   [...view.querySelectorAll('.history-day')].forEach((card, index) => {
-    card.querySelector('.v160-history-a')?.remove();
     const row = rows[index];
     const amount = Number(row?.s?.A ?? row?.s?.a ?? (row?.l || []).reduce((n,r)=>n+Number(r?.A||0),0));
-    if (!(amount > 0)) return;
+    const existing = card.querySelector('.v160-history-a');
+    if (!(amount > 0)) { existing?.remove(); return; }
+    const text = `A アルコール ${Math.round(amount * 10) / 10}g`;
+    if (existing) {
+      if (existing.textContent !== text) existing.textContent = text;
+      return;
+    }
     const head = card.querySelector('.history-head');
-    head?.insertAdjacentHTML('afterend', `<div class="v160-history-a">A アルコール ${Math.round(amount * 10) / 10}g</div>`);
+    head?.insertAdjacentHTML('afterend', `<div class="v160-history-a">${text}</div>`);
   });
 }
 
@@ -125,17 +145,18 @@ function renderTargetPanel() {
   if (panel) panel.outerHTML = targetPanelHtml();
 }
 
-function mergeDummy(days) {
+async function mergeDummy(days) {
+  const tools = await managerTools();
   const target = readTargets();
   const oldHistory = readArray(KEYS.history).filter(row => !isDummyHistoryRow(row));
-  const dummyHistory = generateRealisticHistory({ days, targetCal: target.cal, seed: 20260910 + days, includeAlcohol: true });
+  const dummyHistory = tools.generateRealisticHistory({ days, targetCal: target.cal, seed: 20260910 + days, includeAlcohol: true });
   const history = [...dummyHistory, ...oldHistory].sort((a,b)=>String(b?.d||'').localeCompare(String(a?.d||'')));
   localStorage.setItem(KEYS.history, JSON.stringify(history));
 
   const oldBody = readArray(KEYS.body).filter(row => row?.isDummy !== true);
   const latestWeight = oldBody.length ? Number(oldBody[oldBody.length - 1]?.weight ?? oldBody[oldBody.length - 1]?.w) : 72;
   const latestFat = oldBody.length ? Number(oldBody[oldBody.length - 1]?.fat ?? oldBody[oldBody.length - 1]?.bf) : 22;
-  const dummyBody = generateRealisticBody({ days, seed: 20260910 + days, startWeight: Number.isFinite(latestWeight)?latestWeight:72, startFat: Number.isFinite(latestFat)?latestFat:22 });
+  const dummyBody = tools.generateRealisticBody({ days, seed: 20260910 + days, startWeight: Number.isFinite(latestWeight)?latestWeight:72, startFat: Number.isFinite(latestFat)?latestFat:22 });
   const body = [...oldBody, ...dummyBody].sort((a,b)=>String(a?.date||a?.d||'').localeCompare(String(b?.date||b?.d||'')));
   localStorage.setItem(KEYS.body, JSON.stringify(body));
 }
@@ -161,7 +182,7 @@ function queuePatch() {
   requestAnimationFrame(patchAll);
 }
 
-document.addEventListener('click', event => {
+document.addEventListener('click', async event => {
   const button = event.target.closest('[data-v160-action]');
   if (!button) return;
   const action = button.dataset.v160Action;
@@ -183,8 +204,8 @@ document.addEventListener('click', event => {
   if (action === 'dummy') {
     const days = Number(button.dataset.days) === 90 ? 90 : 30;
     if (!confirm(`${days}日分の開発用デコイを作成します。実データは残します。`)) return;
-    mergeDummy(days);
-    location.reload();
+    try { await mergeDummy(days); location.reload(); }
+    catch (error) { console.error('[Manager]', error); alert('デコイ生成に失敗しました。実データは変更していません。'); }
   }
   if (action === 'clear-dummy') {
     if (!confirm('開発用デコイだけ削除します。実データは残します。')) return;
