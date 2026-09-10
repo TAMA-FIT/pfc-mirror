@@ -40,19 +40,40 @@ function mimeRate(mime){
   return m?Number(m[1]):24000;
 }
 
-export const LIVE_AUDIO_PREROLL_SEC=0.12;
-export const LIVE_AUDIO_REBUFFER_THRESHOLD_SEC=0.035;
+function int16ToFloat32(pcm){
+  const floats=new Float32Array(pcm.length);
+  for(let i=0;i<pcm.length;i++)floats[i]=pcm[i]/32768;
+  return floats;
+}
 
-export function nextPlaybackStart(now,playAt,lead=LIVE_AUDIO_PREROLL_SEC,threshold=LIVE_AUDIO_REBUFFER_THRESHOLD_SEC){
+function concatInt16(chunks){
+  const length=chunks.reduce((sum,chunk)=>sum+chunk.length,0);
+  const out=new Int16Array(length);
+  let offset=0;
+  for(const chunk of chunks){out.set(chunk,offset);offset+=chunk.length}
+  return out;
+}
+
+export const LIVE_AUDIO_TARGET_BUFFER_SEC=0.30;
+export const LIVE_AUDIO_REBUFFER_THRESHOLD_SEC=0.06;
+export const LIVE_AUDIO_START_DELAY_SEC=0.02;
+
+export function shouldStartBufferedPlayback(pendingDuration,target=LIVE_AUDIO_TARGET_BUFFER_SEC){
+  return Number(pendingDuration)>=Number(target);
+}
+
+export function shouldRebuffer(now,playAt,threshold=LIVE_AUDIO_REBUFFER_THRESHOLD_SEC){
   const current=Number.isFinite(Number(now))?Number(now):0;
   const queued=Number.isFinite(Number(playAt))?Number(playAt):0;
-  return queued>current+threshold?queued:current+lead;
+  return queued<=current+Number(threshold);
 }
 
 export class LiveAudioIO{
   constructor(){
     this.ctx=null;this.stream=null;this.source=null;this.processor=null;this.silentGain=null;
     this.onPcm=null;this.outputNodes=new Set();this.playAt=0;
+    this.pending=[];this.pendingDuration=0;this.playbackActive=false;
+    this.rawCurrent=[];this.lastRawTurn=null;this.diagnosticReplayActive=false;
   }
 
   async prepare(){
@@ -75,7 +96,7 @@ export class LiveAudioIO{
     this.silentGain=this.ctx.createGain();
     this.silentGain.gain.value=0;
     this.processor.onaudioprocess=e=>{
-      if(!this.onPcm)return;
+      if(!this.onPcm||this.diagnosticReplayActive)return;
       const input=e.inputBuffer.getChannelData(0);
       const samples=downsample(input,this.ctx.sampleRate,16000);
       this.onPcm(floatToPcm16(samples));
@@ -85,31 +106,136 @@ export class LiveAudioIO{
     this.silentGain.connect(this.ctx.destination);
   }
 
-  play(base64,mimeType='audio/pcm;rate=24000'){
-    if(!this.ctx||!base64)return;
-    const pcm=base64ToInt16(base64);
-    if(!pcm.length)return;
-    const floats=new Float32Array(pcm.length);
-    for(let i=0;i<pcm.length;i++)floats[i]=pcm[i]/32768;
-    const rate=mimeRate(mimeType);
+  _createBuffer(pcm,rate){
+    const floats=int16ToFloat32(pcm);
     const buffer=this.ctx.createBuffer(1,floats.length,rate);
     buffer.copyToChannel(floats,0);
+    return buffer;
+  }
+
+  _scheduleChunk(chunk,start){
     const node=this.ctx.createBufferSource();
-    node.buffer=buffer;
+    node.buffer=this._createBuffer(chunk.pcm,chunk.rate);
     node.connect(this.ctx.destination);
-    const now=this.ctx.currentTime;
-    const start=nextPlaybackStart(now,this.playAt);
     node.start(start);
-    this.playAt=start+buffer.duration;
+    this.playAt=start+chunk.duration;
     this.outputNodes.add(node);
     node.onended=()=>this.outputNodes.delete(node);
   }
 
-  interruptOutput(){
+  _startBufferedPlayback(force=false){
+    if(!this.ctx||!this.pending.length)return false;
+    if(!force&&!shouldStartBufferedPlayback(this.pendingDuration))return false;
+    const now=this.ctx.currentTime;
+    let start=Math.max(now+LIVE_AUDIO_START_DELAY_SEC,this.playAt>now?this.playAt:0);
+    const queued=this.pending;
+    this.pending=[];
+    this.pendingDuration=0;
+    for(const chunk of queued){
+      this._scheduleChunk(chunk,start);
+      start=this.playAt;
+    }
+    this.playbackActive=true;
+    return true;
+  }
+
+  play(base64,mimeType='audio/pcm;rate=24000'){
+    if(!this.ctx||!base64)return;
+    const pcm=base64ToInt16(base64);
+    if(!pcm.length)return;
+    const rate=mimeRate(mimeType);
+    const chunk={pcm:new Int16Array(pcm),rate,duration:pcm.length/rate};
+    this.rawCurrent.push({pcm:new Int16Array(pcm),rate});
+
+    const now=this.ctx.currentTime;
+    if(this.playbackActive&&!shouldRebuffer(now,this.playAt)){
+      this._scheduleChunk(chunk,this.playAt);
+      return;
+    }
+
+    this.playbackActive=false;
+    this.pending.push(chunk);
+    this.pendingDuration+=chunk.duration;
+    this._startBufferedPlayback(false);
+  }
+
+  completeModelTurn(){
+    this._startBufferedPlayback(true);
+    if(!this.rawCurrent.length)return this.getLastTurnRawInfo();
+    const segments=this.rawCurrent;
+    this.rawCurrent=[];
+    const rates=[...new Set(segments.map(x=>x.rate))];
+    const durationSec=segments.reduce((sum,x)=>sum+x.pcm.length/x.rate,0);
+    this.lastRawTurn={
+      segments:segments.map(x=>({pcm:new Int16Array(x.pcm),rate:x.rate})),
+      rate:rates.length===1?rates[0]:null,
+      chunkCount:segments.length,
+      durationSec
+    };
+    return this.getLastTurnRawInfo();
+  }
+
+  getLastTurnRawInfo(){
+    const turn=this.lastRawTurn;
+    if(!turn)return null;
+    return {rate:turn.rate,chunkCount:turn.chunkCount,durationSec:turn.durationSec};
+  }
+
+  hasLastTurnRaw(){return !!this.lastRawTurn?.segments?.length}
+
+  async replayLastTurnRaw(){
+    if(!this.ctx||!this.hasLastTurnRaw())throw new Error('再生できる直前AI音声がありません');
+    this._stopOutput({clearPending:true,discardCapture:false});
+    this.diagnosticReplayActive=true;
+    try{
+      const turn=this.lastRawTurn;
+      if(turn.rate){
+        const pcm=concatInt16(turn.segments.map(x=>x.pcm));
+        const buffer=this._createBuffer(pcm,turn.rate);
+        await new Promise((resolve,reject)=>{
+          try{
+            const node=this.ctx.createBufferSource();
+            node.buffer=buffer;
+            node.connect(this.ctx.destination);
+            this.outputNodes.add(node);
+            node.onended=()=>{this.outputNodes.delete(node);resolve()};
+            node.start(this.ctx.currentTime+LIVE_AUDIO_START_DELAY_SEC);
+          }catch(e){reject(e)}
+        });
+      }else{
+        let start=this.ctx.currentTime+LIVE_AUDIO_START_DELAY_SEC;
+        await new Promise((resolve,reject)=>{
+          try{
+            let remaining=turn.segments.length;
+            for(const segment of turn.segments){
+              const node=this.ctx.createBufferSource();
+              const buffer=this._createBuffer(segment.pcm,segment.rate);
+              node.buffer=buffer;
+              node.connect(this.ctx.destination);
+              this.outputNodes.add(node);
+              node.onended=()=>{this.outputNodes.delete(node);remaining--;if(remaining===0)resolve()};
+              node.start(start);
+              start+=buffer.duration;
+            }
+          }catch(e){reject(e)}
+        });
+      }
+      return this.getLastTurnRawInfo();
+    }finally{
+      this.diagnosticReplayActive=false;
+    }
+  }
+
+  _stopOutput({clearPending=true,discardCapture=true}={}){
     for(const node of this.outputNodes){try{node.stop()}catch{}}
     this.outputNodes.clear();
+    if(clearPending){this.pending=[];this.pendingDuration=0}
+    if(discardCapture)this.rawCurrent=[];
     this.playAt=this.ctx?.currentTime||0;
+    this.playbackActive=false;
   }
+
+  interruptOutput(){this._stopOutput({clearPending:true,discardCapture:true})}
 
   stopCapture(){
     this.onPcm=null;
@@ -123,8 +249,9 @@ export class LiveAudioIO{
   }
 
   async close(){
-    this.interruptOutput();
+    this._stopOutput({clearPending:true,discardCapture:true});
     this.stopCapture();
+    this.lastRawTurn=null;
     const ctx=this.ctx;
     this.ctx=null;
     try{await ctx?.close()}catch{}
