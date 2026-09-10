@@ -1,188 +1,135 @@
 # PFC Mirror Current Development State
 
-Last memory refresh: 2026-09-10 JST
+Last memory refresh: 2026-09-11 JST
 
-## Canonical runtime state
+## Canonical rule
 
-- Production app version displayed by current runtime: **v1.6.1**
-- Runtime release merge commit: `81281dd21a2cecc8c1dadfe47672baaf594b6ff9`
-- `main` immediately before this current-state memory file was created: `969938060fd4f57ddb3dbaa86d256e9d28d17449`
-- This developer-memory write itself advances `main`; future sessions must always fetch Fresh `main` rather than assuming either SHA is still HEAD.
+Fresh GitHub `main` is always canonical for code/version state. This file records development intent, verified milestones, unresolved defects, and handoff context. If this file and Fresh `main` disagree about code or version, Fresh `main` wins.
 
-## v1.6.1 release contents
+## Runtime state before the current v1.7.7 candidate
 
-The released senior integration currently includes:
+- Production app version: **v1.7.6**
+- Production `main` commit before the current branch: `90fc605a268412b26bd8a98c41d8a6201507f253`
+- Public URL: `https://tama-fit.github.io/pfc-mirror/`
+- Root `index.html` is an active runtime entrypoint and must be updated together with `clean/index.html` when version/cache markers change.
+- Current integration branch at this memory refresh: `fix/v177-live-audio-transcript`
+- Intended next public version after merge: **v1.7.7**
 
-- calorie presets: 1200 / 1600 / 2000 / 2400 kcal
-- PFC balance presets: standard / low-fat / muscle gain / keto
-- P/F/C target grams derived mechanically from calorie target + energy-ratio mode
-- alcohol A display only when alcohol is present
-- history A display when relevant
-- hidden developer Manager Mode / decoy tools
-- v1.6.1 observer/dummy-cleanup stability fixes
+## Gemini Live production integration status
 
-Current normal voice/AI/Food-ID architecture was intentionally preserved during the v1.6.1 stability release.
+Genuine Gemini Live is now integrated into the production app as a separate Live path from the legacy normal voice-input path.
 
-## Relevant release history
+User device verification on Android Chrome has already proven the following sequence works:
 
-- PR #23 — `Senior PFC workbench round 2`
-  - still open as Draft at this memory refresh
-  - design/workbench only
-  - old v1.5.1 baseline
-  - do not merge blindly; much of its intent has already been integrated by later runtime work
+1. GitHub Pages opens the Live UI.
+2. App POSTs `taskType: liveToken` to the existing GAS endpoint.
+3. GAS V12 obtains a short-lived Gemini Live token without returning the permanent API key.
+4. Browser opens the Gemini Live WebSocket.
+5. Gemini Live returns `setupComplete`.
+6. The model opens with `何を食べましたか？`.
+7. User speech is transcribed.
+8. Gemini Live responds conversationally.
+9. `update_meal_draft` Function Calling updates food cards.
+10. Existing deterministic resolver/Food Master/nutrition path remains authoritative for food identity/nutrition.
 
-- PR #25 — redundant v1.6 runtime candidate
-  - closed without merge after discovering equivalent v1.6.0 implementation had already landed on `main`
+The user has device-verified a draft containing at least:
 
-- PR #26 — `Stabilize v1.6.1 senior runtime observer and dummy cleanup`
-  - merged
-  - CI/smoke check passed before merge
+- chicken breast resolved as skinless at 200 g after the user clarified it
+- natto represented as one assumed pack
 
-## Critical lessons from the v1.6 integration
+This proves basic real Live conversation + Function Calling + draft-card mutation is working end-to-end. It does **not** yet prove all correction/reference/reconnect/audio-quality cases.
 
-### Public entrypoint
+## GAS / authentication state
 
-Root `index.html` is an active entrypoint that directly loads `clean/` runtime assets. Updating only `clean/index.html` is insufficient for the canonical public URL.
+The user deployed **GAS V12** manually in Apps Script. Keep GAS V12 unchanged unless a later issue specifically points back to token issuance.
 
-### Concurrent-main protection
+The same Script Properties Gemini API key is used for normal Gemini requests and for issuing Gemini Live ephemeral tokens. The permanent key must never be committed to GitHub or returned to the browser.
 
-While a candidate branch was being prepared, `main` moved. The workflow correctly detected this before merge. Future work must repeat this check every time.
+Earlier diagnostics established:
 
-### No duplicate implementation layers
+- PROBE V10 proved the public app was calling the intended GAS deployment.
+- V11/V12 token work progressed through Apps Script and eventually succeeded.
+- Android Chrome initially returned `Failed to fetch`; later V12 + app changes succeeded.
+- Android Chrome then returned WebSocket message frames as `Blob`; v1.7.6 added string/Blob/ArrayBuffer decoding and device verification reached `setupComplete`.
 
-If `main` already contains an implementation equivalent to a pending branch, stop and inspect instead of merging both.
+## v1.7.7 candidate: audio and transcript polish
 
-## Open bug: normal voice meal memo can fail
+Real-device Live testing exposed two UX defects after basic Live success:
 
-The user device reported a failure after speaking content similar to:
+1. Intermittent `ビー` / buzzer-like audio artifacts during model playback.
+2. Output transcription text accumulated/repeated across turns and fragments.
 
-`鶏胸肉と米と納豆`
+The v1.7.7 candidate changes only the Live front-end path:
 
-Observed behavior:
+- adds a small Web Audio jitter buffer with ~120 ms preroll and rebuffer threshold
+- keeps sequential PCM chunks scheduled ahead instead of starting a late chunk almost immediately
+- adds transcript fragment coalescing for cumulative/repeated/overlapping fragments
+- resets the displayed transcript pair when speaker turns change, so old turns do not keep concatenating into the current AI card
+- cache-busts Live modules to v1.7.7
 
-- speech transcript appeared
-- AI/meal cards did not populate
-- UI remained in `聞き取り中`
-- no useful conversational answer was returned
+Normal AI, legacy voice input, Food Master, nutrition engine, storage, and GAS V12 are intentionally untouched.
 
-Read-only comparison found:
+The audio and transcript changes are automated-test candidates only until the user verifies them on the Android device. Do not claim the buzzer or transcript defect fixed before that device test.
 
-- `clean/src/voice/input.js` remained byte-identical/blob-identical to the prior v1.5.1 implementation
-- normal AI entry files also remained on the existing implementation
-- the pipeline has mechanical optimistic parsing and trusted-candidate/Food-ID gating around the semantic model
+## Live architecture invariant
 
-Current conclusion:
+```text
+microphone audio
+  -> Gemini Live semantic conversation
+  -> update_meal_draft Function Call
+  -> semantic draft validator/store
+  -> immediate UI card update
+  -> background deterministic Food Resolver
+  -> trusted Food ID
+  -> Food Master
+  -> nutrition engine
+  -> explicit Register
+```
 
-Do not assume the model itself is unable to understand ordinary Japanese conjunctions. The architecture is over-constrained around the model. A one-off regex patch for `と` is not the desired final fix.
+Gemini may interpret food names, quantity/unit, references, corrections, deletion and semantic variants. Gemini must not author P/F/C/A, kcal, Food IDs, nutrition values, or database truth.
 
-Desired normal-AI architecture remains:
+## Chicken breast exception
 
-`flexible semantic interpretation -> deterministic Food Resolver -> trusted Food ID -> Food Master -> mechanical nutrition`
+Do not build a generic per-food qualifier rules engine.
 
-This bug is **not considered device-verified fixed** at this state.
+The currently explicit product exception is chicken breast only:
 
-## New planned feature: genuine Gemini Live conversation
+- Live must not silently assume skinless when skin state is unknown.
+- Ask naturally for skin-on/skin-off when needed.
+- If quantity is also unknown, Gemini may combine questions naturally.
+- Once clarified, update the same draft item/card.
 
-The user wants to replace the pseudo-conversation experience with a genuine persistent Live conversation mode.
+Do not spread this exception to beef or unrelated foods unless real testing establishes a product need.
 
-Current intended model candidate from the user's API quota list:
+## Open normal-voice defect
 
-**Gemini 3 Flash Live**
+The legacy normal voice-input path remains separate from Gemini Live. A previously reported case such as `鶏胸肉と米と納豆` could leave a transcript visible while the meal memo remained empty.
 
-Desired UX:
+Source comparison showed v1.6 did not simply replace the normal voice/AI core. Do not solve this by piling on regex rules. The intended normal-AI architecture remains:
 
-- user presses Live start once
-- Live session remains active across multiple turns
-- normal pauses do not terminate the session
-- Gemini speaks naturally
-- candidate meal cards update during the conversation
-- follow-up questions are conversational and minimal
-- natural corrections work (`それぞれ200g`, `皮あり`, `納豆やっぱ消して`)
-- nutrition values remain deterministic and outside model authority
-- explicit register button remains the final commit action
-- explicit End closes the Live session
-- idle/network/page lifecycle behavior must be designed before production integration
+`flexible semantic AI -> deterministic Food Resolver -> trusted Food ID -> Food Master -> mechanical nutrition`
 
-See `GEMINI_LIVE_SANDBOX.md` for the full sandbox contract.
+This legacy-path issue is still not considered device-verified fixed.
 
-## Local sandbox already created in the originating chat
+## Development protocol reminders
 
-Artifact name:
+- Do not jump directly into implementation from a newly reported symptom.
+- Discuss symptom, likely cause, target UX, side effects, and scope first.
+- Fresh-check `main` before branching and again before merge because `main` has moved unexpectedly during prior work.
+- Prefer isolated Live changes; protect stable normal AI/voice/storage/nutrition code.
+- Branch -> CI -> PR/diff -> merge -> real-device verification.
+- A CI pass is not a device pass.
+- Every public runtime change gets a visible version bump so the user can distinguish cache/runtime states.
 
-`pfc-mirror-gemini-live-sandbox-v0.1.zip`
+## Immediate next action after v1.7.7 merge
 
-It was created from a Fresh runtime snapshot and included:
+Real-device test on Android Chrome:
 
-- specification documents
-- architecture/decision/test matrices
-- semantic contract validator
-- draft reducer
-- Live session state machine
-- Mock Live client
-- scripted conversation tests
+1. confirm visible version v1.7.7
+2. start Live and confirm `setupComplete`
+3. listen for buzzer/click artifacts through several model replies
+4. make at least two user/model turns and verify old transcript text does not concatenate into the next turn
+5. verify cards still update through Function Calling
+6. test a correction such as `米200じゃなくて150` or `ごめん鶏ももだった`
 
-Tests passed locally with exit code 0:
-
-- session-machine test
-- semantic-contract test
-- conversation-scenarios test
-
-No real Gemini Live network connection was wired yet. No production runtime was modified by that sandbox.
-
-## Next recommended development action
-
-If development resumes from here, do **not** start by editing GitHub production files.
-
-Recommended order:
-
-1. Read all files in `docs/developer-memory/`.
-2. Fetch Fresh `main` and verify production version/state.
-3. Continue/recreate the Gemini Live sandbox locally/chat-side.
-4. Finalize the Live session contract:
-   - model identifier
-   - function/tool schema
-   - semantic patch/snapshot format
-   - interruption behavior
-   - idle timeout
-   - reconnect/session resumption
-   - page/background lifecycle
-   - post-registration session behavior
-5. Expand mock scenarios and automated tests.
-6. Wire real Gemini Live only after state/semantic tests are stable.
-7. Test real audio/session behavior.
-8. Create a separate production integration branch from a new Fresh `main`.
-9. PR/diff/device review.
-10. Merge only after approval.
-
-## Product scope reminders
-
-Keep/rebuild:
-
-- current normal voice input unless specifically fixing its open bug
-- flexible AI semantic understanding
-- deterministic Food ID/Food Master nutrition
-- senior-friendly calorie/PFC presets
-- automatic alcohol handling
-- manual input fallback
-- favorites/quick input
-- today's records
-- history
-- simplified statistics
-- body composition
-- backup/restore
-- hidden developer Manager Mode
-
-Do not restore as ordinary elderly-user features:
-
-- cheat day
-- meal gacha / recipe / meal suggestion system
-- camera food input
-- nutrition-label camera scanner
-- body photo album
-- rigid old AI command-tag architecture
-- visible developer/Manager UI
-- huge old local database browser as primary UX
-
-## Final rule
-
-Fresh GitHub is canonical for current code. These memory files are canonical for **intent, constraints, process and handoff**, but must be updated when decisions materially change.
+If audio artifacts remain, diagnose playback timing/feedback separately rather than modifying semantic/Function Calling logic.
