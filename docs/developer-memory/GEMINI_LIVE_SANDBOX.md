@@ -2,240 +2,291 @@
 
 ## Status
 
-Gemini Live is being developed **outside the production runtime first** in a chat-local ZIP workbench.
+Gemini Live is being developed outside the production runtime first in a chat-local ZIP workbench.
 
-Current workbench artifact: `pfc-mirror-gemini-live-sandbox-v0.3.zip`.
+Current workbench artifact: `pfc-mirror-gemini-live-sandbox-v0.4.zip`.
 
-This sandbox is not production code and must not be treated as deployed merely because its design/tests pass locally. If the ZIP is unavailable in a future chat, reconstruct it from this memory plus Fresh GitHub state rather than guessing.
+The sandbox is not deployed production code. Local tests do not prove real Gemini Live, microphone, WebSocket, Android Chrome, or production-runtime behavior.
 
-## API/model direction
+If a future chat cannot access the ZIP, reconstruct the workbench from this memory plus Fresh GitHub state rather than guessing.
 
-The user's quota/model list included these Live API entries:
+## Mandatory resume rule
 
-- Gemini 2.5 Flash Native Audio Dialog — Live API — RPM unlimited / TPM 1M / RPD unlimited
-- Gemini 3 Flash Live — Live API — RPM unlimited / TPM 65K / RPD unlimited
-- Gemini 3.5 Live Translate — Live API
-- Gemini 3.5 Transcribe / Transcribe Live — transcription-oriented Live API entries
+A future development chat must first read:
 
-Current first candidate for PFC Mirror conversational Live mode: **Gemini 3 Flash Live**.
+1. `docs/developer-memory/README.md`
+2. `docs/developer-memory/CURRENT_STATE.md`
+3. `docs/developer-memory/DEVELOPMENT_PROTOCOL.md`
+4. this file
+5. then fetch Fresh GitHub `main`
 
-Do not infer the exact API model identifier from the UI display name. Verify current Google API documentation/model identifiers immediately before real API wiring.
+Fresh GitHub wins for code/version state. This memory wins for agreed design/process intent unless the user explicitly changes it.
+
+## Model direction
+
+The user's API quota/model list includes a Live API entry displayed as `Gemini 3 Flash Live` and this is the first candidate for PFC Mirror Live conversation mode.
+
+Do not infer the exact API model identifier from that UI display name. Verify current Google API documentation immediately before real API wiring.
+
+Google's current Live API documentation confirms Function Calling is supported. Current Gemini 3.x Flash Live documentation describes synchronous Function Calling, so PFC Mirror's draft-update tool is intentionally designed to be very small and fast; resolver work is started independently rather than making the model wait for nutrition resolution.
 
 ## Desired Live UX
 
-The existing app's visible conversation-like flow is not a genuine persistent Live session. Desired behavior:
+- User starts Live once.
+- Real-time session stays open across multiple turns.
+- Opening model utterance is short: `何を食べましたか？`
+- Normal silence ends a speech turn, not the Live session.
+- Model speaks naturally and decides ordinary acknowledgement/question wording.
+- Food cards appear/update during conversation.
+- Natural corrections such as `それぞれ200g`, `ごめん鶏ももだった`, `米200じゃなくて150`, `納豆やっぱ消して` update the same draft items.
+- Final registration is always an explicit user action.
+- Session termination/timeout/VAD details remain to be real-device tuned.
 
-1. User starts Live mode once.
-2. A real-time session remains open across multiple turns.
-3. The model opens with a short line: **「何を食べましたか？」**
-4. A normal pause ends an utterance/turn, not the session.
-5. Gemini talks naturally and asks only for information it still needs.
-6. Food candidate cards update while the conversation continues.
-7. Natural corrections such as 「それぞれ200g」「皮ありだった」「納豆やっぱ消して」 update the same semantic items rather than creating duplicates.
-8. Registration is always an explicit user action.
-9. Session ends by explicit End or a defined lifecycle/timeout/fatal condition.
-
-## Core architecture invariant
+## Architecture invariant
 
 ```text
 microphone audio
   -> Gemini Live semantic conversation
-  -> semantic meal draft / tool events
-  -> deterministic Food Resolver
+  -> update_meal_draft Function Call
+  -> semantic draft validator/store
+  -> immediate UI card update
+  -> background deterministic Food Resolver
   -> trusted Food ID
   -> Food Master
   -> nutrition engine
-  -> UI cards
   -> explicit Register
 ```
 
-Live AI may understand food names, quantities, units, conversational references, corrections, additions/removals and short replies.
+Gemini Live may interpret:
 
-Live AI must **not** author P/F/C/A/kcal, authoritative Food IDs, or nutrition database values.
+- food names
+- quantities and units
+- conversational references
+- additions
+- corrections
+- deletions
+- semantic variants/qualifiers the user actually meant
+- short natural replies
 
-AI stays flexible; nutrition truth stays mechanical.
+Gemini Live must not author:
 
-## Critical product decision: do NOT create a generic qualifier rules engine
-
-The user explicitly rejected a generalized system such as `requiredQualifiers` for every food. Reason: the rule set could grow without bound and progressively remove the advantage of using a capable language model.
-
-Therefore:
-
-- Do **not** create a generic per-food attribute/qualifier framework at this stage.
-- Let Gemini Live handle ordinary conversational interpretation flexibly.
-- Add narrow explicit product exceptions only when real usage proves they are necessary.
-
-### First and currently only explicit exception: chicken breast
-
-Current PFC Mirror tends to surface chicken breast as skinless even when the user did not say skinless. Live mode must not do that.
-
-For semantic chicken breast only (`鶏胸`, `鶏胸肉`, `鶏むね`, etc.):
-
-- never silently default to `skin-off`
-- if skin status is unknown, keep it unknown
-- candidate UI must not claim `皮なし`
-- Live should naturally ask whether it was skin-on or skin-off
-- if amount is also missing, Live should preferably ask both in one short turn
-- once the user says `皮あり` / `皮なし`, update the same item
-
-This is intentionally **not** a generic meat rule. Beef and unrelated foods must not inherit a skin question.
+- P/F/C/A
+- kcal/calories
+- authoritative Food IDs
+- nutrition values
+- database/source truth
 
 ## Conversation policy
 
-Do not hard-code detailed conversation scripts or per-food question sequences. Gemini Live should decide ordinary phrasing, acknowledgements, question order, contextual references and corrections.
+Do not hard-code detailed conversation scripts or per-food question sequences.
 
-App-controlled boundaries:
+App code controls only the hard boundaries: session lifecycle, VAD settings, the semantic Function Calling contract, the chicken-breast exception, trusted Food Resolver/nutrition truth, and explicit registration.
 
-- opening line
-- VAD / end-of-turn timing
-- explicit chicken-breast exception
-- semantic draft contract
-- Food Resolver and nutrition truth
-- explicit registration
-- session lifecycle / timeout / failure behavior
+Gemini controls ordinary conversational behavior: wording, acknowledgement, question order, how to combine questions, and natural interpretation of references/corrections.
 
-Gemini-controlled behavior:
+This boundary is deliberate. Do not replace model intelligence with an expanding regex/rule system.
 
-- natural acknowledgements
-- whether to ask immediately or after a short conversational acknowledgement
-- how to combine missing-information questions
-- contextual interpretation such as 「それぞれ200g」「さっきの肉」「ごめん、鶏ももだった」「米200じゃなくて150」
+## Critical product decision: no generic qualifier rules engine
 
-This boundary is deliberate: do not replace model intelligence with an expanding regex/rule system.
+Do not create a generalized `requiredQualifiers` system for every food. The user explicitly rejected this because it can grow without bound and progressively destroy the benefit of using a capable language model.
 
-## Example target conversation
+Add narrow explicit product exceptions only when real testing proves they are needed.
 
-```text
-Live: 何を食べましたか？
+### First and currently only explicit exception: chicken breast
 
-User: 今日は鶏胸と納豆と米食いました
-Live: 鶏胸と納豆とご飯ですね。鶏胸は皮あり・皮なしのどちらでしたか？ あと、お肉とご飯はどれくらいでした？
+For semantic chicken breast (`鶏胸`, `鶏胸肉`, `鶏むね`, etc.):
 
-Draft:
-- 鶏胸肉 — skin unknown, amount unknown
-- 納豆 — semantic item present
-- 米 — amount unknown
+- never silently default to skinless in Live mode
+- if skin status is unknown, keep it unknown
+- candidate UI must not claim skinless
+- Live should naturally ask skin-on vs skin-off when needed
+- if amount is also missing, Live may combine those questions naturally
+- once stated, update the same item/card
 
-User: 肉と米はそれぞれ200gです。鶏胸は皮ありです
-Live: 鶏胸は皮ありで200g、ご飯も200gですね。
+This rule must not spread to beef or unrelated foods.
 
-Draft:
-- 鶏胸肉 — skin-on, 200g
-- 納豆
-- 米 — 200g
+The current normal-path resolver's bare chicken alias to skinless remains untouched; Live bypasses that default until skin is semantically known.
 
-User: 納豆やっぱ消して
-Live: 納豆は外しました。
-```
+## Immediate background Food Resolver behavior
 
-## Sandbox v0.3 executable pieces
-
-The v0.3 ZIP extends the prior workbench with:
-
-- `live/chicken-breast-exception.js`
-  - deliberately narrow chicken-breast-only guard
-  - prevents implicit skinless default
-- `live/conversation-controller.js`
-  - defines opening utterance `何を食べましたか？`
-  - applies semantic patches and the chicken-breast exception
-- `live/mock-live-client.js`
-  - scripted conversational testing without network/API calls
-- `live/resolver-coordinator.js`
-  - starts trusted Food ID resolution as soon as a semantic card appears
-  - does not wait for amount
-  - reuses Food ID across amount-only changes
-  - re-resolves identity only when semantic name/variant changes
-  - uses per-card revision numbers so stale async results cannot overwrite later corrections
-  - deliberately blocks bare chicken breast from falling into the existing skinless default
-- `live/draft-resolution-bridge.js`
-  - connects semantic draft changes to background resolution
-  - supports immediate card rendering while resolution proceeds independently
-
-The semantic contract forbids model-authored P/F/C/A/kcal/Food ID and internal app-only fields.
-
-## Background resolver timing decision
-
-As soon as Gemini Live emits a semantic food card, the UI may show that card immediately and the trusted Food Resolver should start in parallel.
-
-Do not wait for quantity before resolving identity.
+Start trusted Food Resolver work as soon as a semantic card appears. Do not wait for quantity.
 
 Example:
 
 ```text
-Live semantic event: 米, amount unknown
-  -> UI card appears immediately
-  -> resolveFood("米") runs immediately
-  -> trusted 白米 Food ID can be cached before the user says 200g
-  -> later amount=200g only triggers mechanical nutrition scaling
+semantic card: 米 / amount unknown
+-> card appears immediately
+-> resolveFood("米") starts immediately
+-> trusted 白米 identity can be ready before quantity arrives
+-> later amount=200g only triggers mechanical scaling
 ```
 
-Identity-affecting corrections cause a new resolver revision:
+Re-resolve only when identity-affecting fields currently change (`name` or `variant`). Amount-only changes reuse the existing trusted Food ID.
 
-```text
-r1: 鶏胸 lookup starts
-user: 「ごめん、鶏ももだった」
-r2: 鶏もも lookup starts
-r2 resolves and becomes current
-late r1 result arrives -> stale -> ignored
+Every resolve operation is revisioned. If the user corrects a food while an old lookup is still in flight, the late old result is stale and must never overwrite the newer identity.
+
+## Formal Function Calling contract — sandbox v0.4
+
+Use exactly one custom function:
+
+`update_meal_draft`
+
+Do not split it into many micro-tools such as `addFood`, `changeAmount`, `deleteFood`.
+
+### Input
+
+The function receives a batch of semantic operations:
+
+```json
+{
+  "operations": [
+    {
+      "op": "add | update | remove",
+      "ref": "app-issued ref for update/remove only",
+      "name": "semantic food name",
+      "amount": 200,
+      "unit": "g",
+      "variant": "skin-on"
+    }
+  ]
+}
 ```
 
-This protects Live UX from race-condition regressions.
+Rules:
 
-For bare chicken breast, the resolver must **not** use the current application's default alias that maps bare 鶏むね/鶏胸 to skinless. In Live mode it remains semantically pending until skin-on/skin-off is known.
+- `add`: `name` required, `ref` forbidden
+- `update`: app-issued `ref` required; only changed semantic fields need to be sent
+- `remove`: app-issued `ref` required
+- nutrition/Food-ID/database fields are rejected
 
-## v0.3 local tests
+### Stable refs are app-owned
 
-Current network-free suite passed with exit code 0:
+Gemini does not invent persistent card IDs.
 
-- `session-machine.test.mjs` — PASS
-- `semantic-contract.test.mjs` — PASS
-- `chicken-breast-exception.test.mjs` — PASS
-- `conversation-scenarios.test.mjs` — PASS
-- `resolver-coordinator.test.mjs` — PASS
-- `stale-resolution.test.mjs` — PASS
-- `draft-resolution-bridge.test.mjs` — PASS
+Example:
 
-These tests prove sandbox state/contract behavior only. They do **not** prove real Gemini Live, microphone, WebSocket, Android Chrome or production-runtime behavior.
+1. Gemini adds `鶏胸肉`
+2. app creates and returns `ref=item-1`
+3. user says `ごめん、鶏ももだった`
+4. Gemini updates `ref=item-1`
+5. same card changes identity; no duplicate is created
 
-## Existing trusted resolver facts relevant to Live
+When food identity changes and Gemini does not explicitly provide a replacement variant, the draft store clears the old variant so `skin-on` cannot leak from chicken breast into another food.
 
-The current production `clean/src/nutrition/catalog.js` already separates trusted automatic resolution from fuzzy UI search. `resolveFood()` accepts only explicit app defaults, exact canonical names, or unique exact aliases. Fuzzy `searchFoods()` must not become nutrition truth.
+### Tool response
 
-The current production alias table maps bare chicken breast names such as `鶏胸肉` to `鶏むね(皮なし)`. That behavior remains valid for the current normal path but must be bypassed by the Live chicken-breast exception until the user supplies skin status.
+The app returns semantic draft state and the app-issued refs, for example:
 
-## Still open before real Live API wiring
+```json
+{
+  "ok": true,
+  "revision": 1,
+  "applied": [
+    {"operationIndex": 0, "op": "add", "ref": "item-1"}
+  ],
+  "draft": [
+    {
+      "ref": "item-1",
+      "name": "鶏胸肉",
+      "amount": null,
+      "unit": "",
+      "variant": "",
+      "chickenBreastSkinPending": true
+    }
+  ],
+  "notices": [
+    {"code": "CHICKEN_BREAST_SKIN_UNCONFIRMED", "message": "..."}
+  ]
+}
+```
 
-- exact current Gemini Live API model identifier
-- authentication/ephemeral credential strategy appropriate for a public web app
-- exact Function Calling/tool schema as sent to the real Gemini Live API
-- barge-in/interruption behavior and VAD tuning on real devices
-- idle timeout and grace prompt timing
+The response intentionally does not expose Food ID or nutrition/macros back to Live.
+
+Accepted draft mutations trigger resolver synchronization immediately, but the tool does not need to wait for resolver completion before returning to Gemini.
+
+## Sandbox executable pieces through v0.4
+
+Core pieces include:
+
+- `live/session-machine.js`
+- `live/contracts.js`
+- `live/mock-live-client.js`
+- `live/conversation-controller.js`
+- `live/chicken-breast-exception.js`
+- `live/resolver-coordinator.js`
+- `live/draft-resolution-bridge.js`
+- `live/update-meal-draft-tool.js`
+- `live/update-meal-draft-contract.js`
+- `live/meal-draft-store.js`
+- `live/update-meal-draft-handler.js`
+- `live/gemini-tool-call-adapter.js`
+
+The Gemini adapter follows the Live API shape conceptually:
+
+`toolCall.functionCalls[] -> local handler -> functionResponses[]`
+
+## Sandbox v0.4 tests
+
+Network-free suite currently passes with exit code 0:
+
+- `session-machine.test.mjs`
+- `semantic-contract.test.mjs`
+- `chicken-breast-exception.test.mjs`
+- `conversation-scenarios.test.mjs`
+- `resolver-coordinator.test.mjs`
+- `stale-resolution.test.mjs`
+- `draft-resolution-bridge.test.mjs`
+- `function-contract.test.mjs`
+- `function-handler.test.mjs`
+- `gemini-tool-call-adapter.test.mjs`
+- `function-conversation-flow.test.mjs`
+
+The tests currently cover:
+
+- session survives ordinary pause
+- chicken breast does not default to skinless
+- no generic meat-skin rule
+- resolver begins before amount is known
+- amount-only update does not re-resolve identity
+- stale async resolver result cannot overwrite a later correction
+- add cannot invent its own ref
+- update/remove require app-issued ref
+- Food ID/PFC/kcal/nutrition fields are rejected from model input
+- app generates stable refs
+- same card survives food correction
+- old variant is cleared on identity change
+- batch add/update/remove works
+- tool response does not leak Food ID/macros
+- Gemini `toolCall.functionCalls[]` adapts to `functionResponses[]`
+- unknown tool fails safely
+
+## Existing normal voice path remains separate
+
+Do not rewrite current `clean/src/voice/input.js` merely to build Live.
+
+A separate normal voice/AI issue was observed where a transcript such as `鶏胸肉と米と納豆` could remain in a dead-end empty memo state. Source inspection showed that v1.6 did not simply replace the voice/AI files. Do not solve that issue by piling on regex rules. Preserve the intended architecture:
+
+`flexible semantic AI -> deterministic Food Resolver -> trusted Food ID -> Food Master`
+
+## Still open before real Live wiring
+
+- exact current API model identifier corresponding to the user's displayed `Gemini 3 Flash Live`
+- public-web authentication / ephemeral-token strategy
+- exact SDK vs raw-WebSocket implementation path
+- VAD/end-of-turn tuning
+- barge-in/interruption behavior
+- idle timeout and grace timing
 - pagehide/background behavior
 - reconnect/session resumption
-- network failure UX
-- registration-after-success session behavior
-- Android microphone lifecycle
+- network-failure UX
+- whether Live remains open after successful registration
+- Android Chrome microphone lifecycle
+- actual function-declaration compatibility test against the real Live API
 
-## Existing normal-voice issue remains separate
+## Next development step
 
-The user previously reported that normal voice input could capture a transcript such as `鶏胸肉と米と納豆` but leave the memo empty/non-registerable. Read-only inspection showed the existing voice/AI source itself had not simply been replaced by v1.6 code; the current pipeline still contains mechanical pre/post constraints around the model.
+Do not integrate production yet.
 
-Do not solve the normal-voice issue merely by piling on regex rules. Preserve the intended division:
+Next logical sandbox phase is to build the real Live transport boundary behind an interface while keeping a mock transport, then verify the exact current Gemini model identifier/authentication requirements and perform a minimal real API handshake/tool-call experiment. Only after that should the Live transport be connected to microphone/audio and existing UI.
 
-`flexible semantic AI -> deterministic Food Resolver -> Food ID -> Food Master`
-
-Also do not modify the current normal voice-input path merely to build Live. Treat Live as a separate architecture until integration is explicitly approved.
-
-## Resume instruction
-
-When continuing this work from a new chat:
-
-1. Read `docs/developer-memory/README.md`, `CURRENT_STATE.md`, `DEVELOPMENT_PROTOCOL.md`, then this file.
-2. Fetch Fresh GitHub `main`; Fresh code/version state wins over remembered SHA/version values.
-3. Continue/recreate the isolated Live sandbox first.
-4. Preserve the chicken-breast-only exception and avoid introducing a generalized qualifier rules framework without explicit user agreement.
-5. Preserve the conversation-policy boundary: AI handles natural dialogue; app code handles hard safety/data boundaries.
-6. Preserve immediate background trusted resolution with per-card revisions and stale-result rejection.
-7. Expand mock/state tests before real API wiring.
-8. Connect the real Gemini Live API only after the contract/state behavior is stable.
-9. Build production integration only against a new Fresh GitHub snapshot, then branch -> diff/PR -> real-device review -> main merge.
+Production integration must later start from a new Fresh GitHub snapshot and follow branch -> diff/PR -> real-device review -> main merge.
