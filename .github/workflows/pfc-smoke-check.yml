@@ -56,7 +56,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.1');
+          assert.equal(LIVE_VERSION, 'v1.7.2');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
@@ -64,4 +64,18 @@ jobs:
           assert.equal(message.setup.tools[0].functionDeclarations[0].name, 'update_meal_draft');
           assert.equal(message.setup.realtimeInputConfig.automaticActivityDetection.silenceDurationMs, 900);
           console.log('Gemini Live setup contract: OK');
+          NODE
+      - name: Live diagnostics contract
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+
+          const transport = fs.readFileSync('./clean/src/live/transport-v170.js', 'utf8');
+          const live = fs.readFileSync('./clean/src/live/live-v170.js', 'utf8');
+          assert.match(transport, /taskType:'liveToken'/);
+          assert.match(transport, /onDiagnostic/);
+          assert.match(live, /pfc-live-diagnostic/);
+          assert.match(live, /app \$\{LIVE_VERSION\}/);
+          console.log('Live diagnostics contract: OK');
           NODE
