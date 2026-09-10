@@ -1,6 +1,6 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.4';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.5';
 import { LiveMealDraft } from './draft-v170.js';
 import { GeminiLiveTransport } from './transport-v170.js?v=1.7.4';
 import { LiveAudioIO } from './audio-v170.js';
