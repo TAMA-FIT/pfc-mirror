@@ -1,4 +1,4 @@
-import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.3';
+import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.4';
 
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
@@ -34,9 +34,9 @@ function diagnosticMessage(diagnostic) {
 async function issueToken() {
   const response = await fetch(GAS_URL, {
     method:'POST',
-    headers:{'Content-Type':'text/plain;charset=utf-8','Accept':'application/json'},
+    headers:{'Content-Type':'text/plain'},
     body:JSON.stringify({taskType:'liveToken'}),
-    cache:'no-store'
+    redirect:'follow'
   });
   if (!response.ok) throw new Error(`GAS HTTP ${response.status}`);
 
