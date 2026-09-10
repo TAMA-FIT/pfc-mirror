@@ -1,8 +1,8 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.1';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.2';
 import { LiveMealDraft } from './draft-v170.js';
-import { GeminiLiveTransport } from './transport-v170.js';
+import { GeminiLiveTransport } from './transport-v170.js?v=1.7.2';
 import { LiveAudioIO } from './audio-v170.js';
 
 const draft=new LiveMealDraft();
@@ -13,6 +13,7 @@ let sessionState='idle';
 let lastUser='';
 let lastModel='';
 let errorText='';
+let diagnosticText='';
 let registeredCount=0;
 let patchQueued=false;
 
@@ -27,12 +28,23 @@ function statusText(){
   return '開始しています…';
 }
 
+function formatDiagnostic(d={}){
+  const parts=[];
+  if(d.stage)parts.push(String(d.stage));
+  if(d.gasBuild)parts.push(String(d.gasBuild));
+  if(d.phase)parts.push(String(d.phase));
+  if(d.httpStatus)parts.push(`HTTP ${d.httpStatus}`);
+  if(d.googleStatus)parts.push(String(d.googleStatus));
+  if(d.message&&d.message!==d.gasBuild)parts.push(String(d.message));
+  return parts.filter(Boolean).join(' | ');
+}
+
 function loadCss(){
   if(document.getElementById('pfc-live-v170-css'))return;
   const link=document.createElement('link');
   link.id='pfc-live-v170-css';
   link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.1',import.meta.url).href;
+  link.href=new URL('../../assets/live-v170.css?v=1.7.2',import.meta.url).href;
   document.head.appendChild(link);
 }
 
@@ -75,6 +87,7 @@ function render(){
     </div>
     <div class="sv4-body">
       <div class="pfc-live-status">${esc(statusText())}</div>
+      ${diagnosticText?`<div class="pfc-live-diagnostic"><strong>診断</strong><span>${esc(diagnosticText)}</span></div>`:''}
       <div class="pfc-live-conversation">
         ${lastUser?`<div><span>あなた</span><b>${esc(lastUser)}</b></div>`:''}
         ${lastModel?`<div class="model"><span>AI</span><b>${esc(lastModel)}</b></div>`:''}
@@ -149,13 +162,14 @@ function appendTranscript(current,addition){
 
 async function startLive(){
   if(transport)return;
-  errorText='';registeredCount=0;lastUser='';lastModel='';draft.clear();
+  errorText='';diagnosticText=`app ${LIVE_VERSION}`;registeredCount=0;lastUser='';lastModel='';draft.clear();
   ensureModal().hidden=false;sessionState='token';render();
   try{
     audio=new LiveAudioIO();
     await audio.prepare();
     transport=new GeminiLiveTransport({
       onState:s=>{sessionState=s;if(s==='turn-complete'){lastUser=lastUser.trim();lastModel=lastModel.trim()}render()},
+      onDiagnostic:d=>{const text=formatDiagnostic(d);if(text)diagnosticText=text;render()},
       onAudio:(data,mime)=>audio?.play(data,mime),
       onInputTranscript:t=>{lastUser=appendTranscript(lastUser,t);render()},
       onOutputTranscript:t=>{lastModel=appendTranscript(lastModel,t);render()},
@@ -169,6 +183,8 @@ async function startLive(){
     transport.sendOpening();
     sessionState='ready';render();
   }catch(e){
+    const d=e?.liveDiagnostic?formatDiagnostic({stage:'token',ok:false,...e.liveDiagnostic}):'';
+    if(d)diagnosticText=d;
     errorText=`接続できません: ${String(e?.message||e)}`;sessionState='error';
     try{transport?.close()}catch{}transport=null;
     try{await audio?.close()}catch{}audio=null;render();

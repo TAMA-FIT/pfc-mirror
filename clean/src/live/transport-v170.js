@@ -1,4 +1,4 @@
-import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js';
+import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.2';
 
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
@@ -10,6 +10,27 @@ function bytesToBase64(bytes) {
   return btoa(s);
 }
 
+function safeDiagnostic(body={}) {
+  return {
+    gasBuild:String(body?.gasBuild||'').trim(),
+    phase:String(body?.phase||'').trim(),
+    message:String(body?.message||'').trim(),
+    httpStatus:Number.isFinite(Number(body?.httpStatus))?Number(body.httpStatus):null,
+    googleStatus:String(body?.googleStatus||'').trim()
+  };
+}
+
+function diagnosticMessage(diagnostic) {
+  if (!diagnostic) return '';
+  const parts=[];
+  if (diagnostic.gasBuild) parts.push(diagnostic.gasBuild);
+  if (diagnostic.phase) parts.push(diagnostic.phase);
+  if (diagnostic.httpStatus) parts.push(`HTTP ${diagnostic.httpStatus}`);
+  if (diagnostic.googleStatus) parts.push(diagnostic.googleStatus);
+  if (diagnostic.message && diagnostic.message!==diagnostic.gasBuild) parts.push(diagnostic.message);
+  return parts.join(' | ');
+}
+
 async function issueToken() {
   const response = await fetch(GAS_URL, {
     method:'POST',
@@ -18,21 +39,32 @@ async function issueToken() {
     cache:'no-store'
   });
   if (!response.ok) throw new Error(`GAS HTTP ${response.status}`);
-  const body=await response.json();
+
+  const raw=await response.text();
+  let body;
+  try {
+    body=JSON.parse(raw);
+  } catch {
+    throw new Error(`GAS応答をJSON解析できません (HTTP ${response.status})`);
+  }
+
+  const diagnostic=safeDiagnostic(body);
   const token=String(body?.token || '').trim();
   if (!token) {
-    const msg=body?.candidates?.[0]?.content?.parts?.[0]?.text || body?.message || 'Live tokenが返りませんでした';
-    throw new Error(String(msg));
+    const msg=body?.candidates?.[0]?.content?.parts?.[0]?.text || body?.message || diagnosticMessage(diagnostic) || 'Live tokenが返りませんでした';
+    const error=new Error(String(msg));
+    error.liveDiagnostic=diagnostic;
+    throw error;
   }
-  return token;
+  return {token,diagnostic};
 }
 
 export class GeminiLiveTransport {
   constructor({
     onState=()=>{},onAudio=()=>{},onInputTranscript=()=>{},onOutputTranscript=()=>{},
-    onToolCall=()=>{},onToolCancellation=()=>{},onInterrupted=()=>{},onError=()=>{}
+    onToolCall=()=>{},onToolCancellation=()=>{},onInterrupted=()=>{},onError=()=>{},onDiagnostic=()=>{}
   }={}) {
-    Object.assign(this,{onState,onAudio,onInputTranscript,onOutputTranscript,onToolCall,onToolCancellation,onInterrupted,onError});
+    Object.assign(this,{onState,onAudio,onInputTranscript,onOutputTranscript,onToolCall,onToolCancellation,onInterrupted,onError,onDiagnostic});
     this.ws=null;
     this.ready=false;
   }
@@ -44,7 +76,15 @@ export class GeminiLiveTransport {
 
   async connect() {
     this.onState('token');
-    const token=await issueToken();
+    let tokenResult;
+    try {
+      tokenResult=await issueToken();
+      this.onDiagnostic({stage:'token',ok:true,...tokenResult.diagnostic});
+    } catch (error) {
+      if (error?.liveDiagnostic) this.onDiagnostic({stage:'token',ok:false,...error.liveDiagnostic});
+      throw error;
+    }
+    const token=tokenResult.token;
     this.onState('connecting');
 
     await new Promise((resolve,reject)=>{
@@ -61,6 +101,7 @@ export class GeminiLiveTransport {
 
       ws.onopen=()=>{
         try {
+          this.onDiagnostic({stage:'websocket',ok:true,message:'WebSocket open'});
           this.onState('setup');
           this.sendObject(buildSetupMessage());
         } catch (e) {
@@ -74,6 +115,7 @@ export class GeminiLiveTransport {
           const msg=JSON.parse(event.data);
           if (msg.setupComplete) {
             this.ready=true;
+            this.onDiagnostic({stage:'setup',ok:true,message:'setupComplete'});
             this.onState('ready');
             if (!settled) {
               settled=true;
@@ -90,6 +132,7 @@ export class GeminiLiveTransport {
 
       ws.onerror=()=>{
         const e=new Error('Gemini Live WebSocket error');
+        this.onDiagnostic({stage:'websocket',ok:false,message:e.message});
         this.onError(e);
         if (!settled) {
           settled=true;
@@ -100,11 +143,12 @@ export class GeminiLiveTransport {
 
       ws.onclose=e=>{
         this.ready=false;
+        this.onDiagnostic({stage:'websocket-close',ok:e.code===1000,message:`code=${e.code}${e.reason?` reason=${e.reason}`:''}`});
         this.onState('closed',{code:e.code,reason:e.reason});
         if (!settled) {
           settled=true;
           clearTimeout(timer);
-          reject(new Error(`Gemini Live closed before ready (${e.code})`));
+          reject(new Error(`Gemini Live closed before ready (${e.code})${e.reason?`: ${e.reason}`:''}`));
         }
       };
     });
