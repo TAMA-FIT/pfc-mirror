@@ -99,7 +99,7 @@ export function generateRealisticHistory({ days = 30, targetCal = 2000, seed = 2
     date.setDate(now.getDate() - offset);
     rows.push(generateDay(rng, date, targetCal, Number(`${date.getFullYear()}${String(date.getMonth()+1).padStart(2,'0')}${String(date.getDate()).padStart(2,'0')}000`)));
   }
-  return rows;
+  return rows.reverse();
 }
 
 export function generateRealisticBody({ days = 90, startWeight = 70, startFat = 22, seed = 20260910, now = new Date() } = {}) {
