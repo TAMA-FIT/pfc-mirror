@@ -1,18 +1,16 @@
-# Gemini Live Sandbox Memory
+# Gemini Live Design / Historical Sandbox Memory
+
+Last refresh: 2026-09-11 JST
 
 ## Status
 
-Gemini Live is being developed outside the production runtime first in a chat-local ZIP workbench.
+The original chat-local sandbox (`pfc-mirror-gemini-live-sandbox-v0.4.zip`) was the design/proof workbench. Genuine Gemini Live has since been integrated into the production runtime.
 
-Current workbench artifact: `pfc-mirror-gemini-live-sandbox-v0.4.zip`.
-
-The sandbox is not deployed production code. Local tests do not prove real Gemini Live, microphone, WebSocket, Android Chrome, or production-runtime behavior.
-
-If a future chat cannot access the ZIP, reconstruct the workbench from this memory plus Fresh GitHub state rather than guessing.
+Do **not** follow older instructions that say Live must not be integrated yet. Fresh GitHub `main` is canonical for current runtime state. This file preserves design invariants and the path that led to production.
 
 ## Mandatory resume rule
 
-A future development chat must first read:
+A future development chat should first read:
 
 1. `docs/developer-memory/README.md`
 2. `docs/developer-memory/CURRENT_STATE.md`
@@ -20,41 +18,57 @@ A future development chat must first read:
 4. this file
 5. then fetch Fresh GitHub `main`
 
-Fresh GitHub wins for code/version state. This memory wins for agreed design/process intent unless the user explicitly changes it.
+Fresh GitHub wins for code/version state. These docs preserve agreed product/architecture intent unless the user explicitly changes it.
 
-## Model direction
+## Current model split
 
-The user's API quota/model list includes a Live API entry displayed as `Gemini 3 Flash Live` and this is the first candidate for PFC Mirror Live conversation mode.
+### Conversational Live agent
 
-Do not infer the exact API model identifier from that UI display name. Verify current Google API documentation immediately before real API wiring.
+- model: `gemini-3.1-flash-live-preview`
+- role: natural spoken conversation, semantic food understanding, Function Calling, spoken response
+- current real-device status: working on Android Chrome through `setupComplete`, multi-turn conversation, Function Calling, and draft-card updates
 
-Google's current Live API documentation confirms Function Calling is supported. Current Gemini 3.x Flash Live documentation describes synchronous Function Calling, so PFC Mirror's draft-update tool is intentionally designed to be very small and fast; resolver work is started independently rather than making the model wait for nutrition resolution.
+### Dedicated display transcription candidate in v1.7.8
+
+- model: `gemini-3.5-transcribe-live`
+- role: user-visible `あなた` transcript only
+- language hint: `ja-JP`
+- mode: `SMART`
+- custom vocabulary: small PFC/food term list
+- same microphone PCM is streamed in parallel to the conversational agent and the transcription model
+- dedicated transcriber gets its own ephemeral token from the existing GAS V12 endpoint
+- if it fails, the voice conversation continues and the UI falls back to the conversational agent's input transcription
+
+The separation exists because real-device tests showed the Live agent can understand the meal correctly while its displayed `inputTranscription` can be badly wrong, including incorrect-language-looking text.
 
 ## Desired Live UX
 
-- User starts Live once.
-- Real-time session stays open across multiple turns.
+- User presses Live once.
+- Session stays open across multiple turns.
 - Opening model utterance is short: `何を食べましたか？`
 - Normal silence ends a speech turn, not the Live session.
-- Model speaks naturally and decides ordinary acknowledgement/question wording.
+- Gemini controls ordinary conversational wording and question order.
 - Food cards appear/update during conversation.
 - Natural corrections such as `それぞれ200g`, `ごめん鶏ももだった`, `米200じゃなくて150`, `納豆やっぱ消して` update the same draft items.
 - Final registration is always an explicit user action.
-- Session termination/timeout/VAD details remain to be real-device tuned.
+- Session closes only through explicit end, page lifecycle, unrecoverable disconnect, or later-defined safety timeout behavior.
 
 ## Architecture invariant
 
 ```text
-microphone audio
-  -> Gemini Live semantic conversation
-  -> update_meal_draft Function Call
-  -> semantic draft validator/store
-  -> immediate UI card update
-  -> background deterministic Food Resolver
-  -> trusted Food ID
-  -> Food Master
-  -> nutrition engine
-  -> explicit Register
+microphone PCM 16 kHz
+  ├─ Gemini 3.1 Flash Live semantic conversation
+  │    -> update_meal_draft Function Call
+  │    -> semantic draft validator/store
+  │    -> immediate card update
+  │    -> background deterministic Food Resolver
+  │    -> trusted Food ID
+  │    -> Food Master
+  │    -> nutrition engine
+  │    -> explicit Register
+  │
+  └─ Gemini 3.5 Transcribe Live
+       -> visible user transcript only
 ```
 
 Gemini Live may interpret:
@@ -78,34 +92,32 @@ Gemini Live must not author:
 
 ## Conversation policy
 
-Do not hard-code detailed conversation scripts or per-food question sequences.
+Do not hard-code detailed scripts or per-food question sequences.
 
-App code controls only the hard boundaries: session lifecycle, VAD settings, the semantic Function Calling contract, the chicken-breast exception, trusted Food Resolver/nutrition truth, and explicit registration.
+App code controls only hard boundaries: session lifecycle, Function Calling schema, explicit chicken-breast exception, trusted resolver/nutrition truth, registration, transport, and safety/failure behavior.
 
-Gemini controls ordinary conversational behavior: wording, acknowledgement, question order, how to combine questions, and natural interpretation of references/corrections.
+Gemini controls ordinary acknowledgement, wording, question order, combining questions, references, and corrections.
 
-This boundary is deliberate. Do not replace model intelligence with an expanding regex/rule system.
+Do not replace model intelligence with an expanding regex/rules engine.
 
 ## Critical product decision: no generic qualifier rules engine
 
-Do not create a generalized `requiredQualifiers` system for every food. The user explicitly rejected this because it can grow without bound and progressively destroy the benefit of using a capable language model.
+Do not create a generalized `requiredQualifiers` system.
 
-Add narrow explicit product exceptions only when real testing proves they are needed.
+Add narrow explicit exceptions only when real product testing proves they are necessary.
 
-### First and currently only explicit exception: chicken breast
+### Current explicit exception: chicken breast only
 
 For semantic chicken breast (`鶏胸`, `鶏胸肉`, `鶏むね`, etc.):
 
 - never silently default to skinless in Live mode
-- if skin status is unknown, keep it unknown
+- if skin state is unknown, keep it unknown
 - candidate UI must not claim skinless
 - Live should naturally ask skin-on vs skin-off when needed
 - if amount is also missing, Live may combine those questions naturally
-- once stated, update the same item/card
+- once stated, update the same card/ref
 
-This rule must not spread to beef or unrelated foods.
-
-The current normal-path resolver's bare chicken alias to skinless remains untouched; Live bypasses that default until skin is semantically known.
+Do not spread this rule to beef or unrelated foods without real evidence.
 
 ## Immediate background Food Resolver behavior
 
@@ -121,21 +133,19 @@ semantic card: 米 / amount unknown
 -> later amount=200g only triggers mechanical scaling
 ```
 
-Re-resolve only when identity-affecting fields currently change (`name` or `variant`). Amount-only changes reuse the existing trusted Food ID.
+Re-resolve only when identity-affecting fields such as `name` or `variant` change. Amount-only changes reuse the existing trusted identity.
 
-Every resolve operation is revisioned. If the user corrects a food while an old lookup is still in flight, the late old result is stale and must never overwrite the newer identity.
+Every resolution request is revisioned so a late stale lookup cannot overwrite a newer correction.
 
-## Formal Function Calling contract — sandbox v0.4
+## Formal Function Calling contract
 
 Use exactly one custom function:
 
 `update_meal_draft`
 
-Do not split it into many micro-tools such as `addFood`, `changeAmount`, `deleteFood`.
+Do not split it into micro-tools such as `addFood`, `changeAmount`, or `deleteFood`.
 
 ### Input
-
-The function receives a batch of semantic operations:
 
 ```json
 {
@@ -154,139 +164,86 @@ The function receives a batch of semantic operations:
 
 Rules:
 
-- `add`: `name` required, `ref` forbidden
+- `add`: `name` required, persistent app ref is not invented by Gemini
 - `update`: app-issued `ref` required; only changed semantic fields need to be sent
 - `remove`: app-issued `ref` required
 - nutrition/Food-ID/database fields are rejected
 
 ### Stable refs are app-owned
 
-Gemini does not invent persistent card IDs.
-
 Example:
 
-1. Gemini adds `鶏胸肉`
-2. app creates and returns `ref=item-1`
-3. user says `ごめん、鶏ももだった`
-4. Gemini updates `ref=item-1`
-5. same card changes identity; no duplicate is created
+1. Gemini adds `鶏胸肉`.
+2. App creates and returns `ref=item-1`.
+3. User says `ごめん、鶏ももだった`.
+4. Gemini updates `ref=item-1`.
+5. The same card changes identity; no duplicate card is created.
 
-When food identity changes and Gemini does not explicitly provide a replacement variant, the draft store clears the old variant so `skin-on` cannot leak from chicken breast into another food.
+When identity changes and Gemini does not provide a replacement variant, the store clears the old variant so chicken-specific state cannot leak into the new food.
 
 ### Tool response
 
-The app returns semantic draft state and the app-issued refs, for example:
+The app returns semantic draft state and app-issued refs, but does not expose Food ID or nutrition/macros back to Gemini.
 
-```json
-{
-  "ok": true,
-  "revision": 1,
-  "applied": [
-    {"operationIndex": 0, "op": "add", "ref": "item-1"}
-  ],
-  "draft": [
-    {
-      "ref": "item-1",
-      "name": "鶏胸肉",
-      "amount": null,
-      "unit": "",
-      "variant": "",
-      "chickenBreastSkinPending": true
-    }
-  ],
-  "notices": [
-    {"code": "CHICKEN_BREAST_SKIN_UNCONFIRMED", "message": "..."}
-  ]
-}
-```
+Resolver synchronization starts immediately after accepted semantic mutations, but the tool response does not wait for nutrition resolution.
 
-The response intentionally does not expose Food ID or nutrition/macros back to Live.
+## Authentication
 
-Accepted draft mutations trigger resolver synchronization immediately, but the tool does not need to wait for resolver completion before returning to Gemini.
+- permanent Gemini API key remains only in GAS Script Properties
+- browser never receives the permanent key
+- GAS V12 issues one-use ephemeral tokens through `/v1beta/auth_tokens`
+- conversational Live socket consumes one token
+- dedicated Transcribe Live socket consumes a second token
+- both tokens come from the same permanent Gemini API key/project
 
-## Sandbox executable pieces through v0.4
+GAS V12 is currently stable and should not be edited merely because front-end Live behavior changes.
 
-Core pieces include:
+## Audio issue under diagnosis
 
-- `live/session-machine.js`
-- `live/contracts.js`
-- `live/mock-live-client.js`
-- `live/conversation-controller.js`
-- `live/chicken-breast-exception.js`
-- `live/resolver-coordinator.js`
-- `live/draft-resolution-bridge.js`
-- `live/update-meal-draft-tool.js`
-- `live/update-meal-draft-contract.js`
-- `live/meal-draft-store.js`
-- `live/update-meal-draft-handler.js`
-- `live/gemini-tool-call-adapter.js`
+Real-device v1.7.7 conversation quality is generally good, but the user hears repeated mechanical buzzer/tone artifacts.
 
-The Gemini adapter follows the Live API shape conceptually:
+The app does not intentionally generate a buzzer. v1.7.7 already introduced a small PCM jitter buffer. v1.7.8 adds event tracing so the buzzer can be correlated with:
 
-`toolCall.functionCalls[] -> local handler -> functionResponses[]`
+- model-audio burst starts
+- suspicious audio-arrival gaps
+- Function Calls
+- interruptions
+- turn completion
+- WebSocket errors/closes/goAway
 
-## Sandbox v0.4 tests
+Do not claim the buzzer is fixed until real-device testing proves it.
 
-Network-free suite currently passes with exit code 0:
+## Historical sandbox tests
 
-- `session-machine.test.mjs`
-- `semantic-contract.test.mjs`
-- `chicken-breast-exception.test.mjs`
-- `conversation-scenarios.test.mjs`
-- `resolver-coordinator.test.mjs`
-- `stale-resolution.test.mjs`
-- `draft-resolution-bridge.test.mjs`
-- `function-contract.test.mjs`
-- `function-handler.test.mjs`
-- `gemini-tool-call-adapter.test.mjs`
-- `function-conversation-flow.test.mjs`
-
-The tests currently cover:
+The original network-free sandbox established these invariants before production wiring:
 
 - session survives ordinary pause
 - chicken breast does not default to skinless
-- no generic meat-skin rule
-- resolver begins before amount is known
-- amount-only update does not re-resolve identity
-- stale async resolver result cannot overwrite a later correction
-- add cannot invent its own ref
-- update/remove require app-issued ref
-- Food ID/PFC/kcal/nutrition fields are rejected from model input
-- app generates stable refs
-- same card survives food correction
-- old variant is cleared on identity change
-- batch add/update/remove works
-- tool response does not leak Food ID/macros
+- no generic meat-skin rules engine
+- resolver starts before amount is known
+- amount-only changes do not re-resolve identity
+- stale async resolver result cannot overwrite a correction
+- add/update/remove contract validation
+- app-owned stable refs
+- same card survives semantic correction
+- Food ID/PFC/kcal fields are rejected from model input
+- tool response does not leak nutrition truth
 - Gemini `toolCall.functionCalls[]` adapts to `functionResponses[]`
-- unknown tool fails safely
 
-## Existing normal voice path remains separate
+Production CI and Android device tests supersede the sandbox for current runtime behavior.
 
-Do not rewrite current `clean/src/voice/input.js` merely to build Live.
+## Legacy normal voice path remains separate
 
-A separate normal voice/AI issue was observed where a transcript such as `鶏胸肉と米と納豆` could remain in a dead-end empty memo state. Source inspection showed that v1.6 did not simply replace the voice/AI files. Do not solve that issue by piling on regex rules. Preserve the intended architecture:
+Do not rewrite `clean/src/voice/input.js` merely because Live changes.
+
+The legacy normal-path issue where a transcript such as `鶏胸肉と米と納豆` could remain with an empty memo is a separate bug. Preserve the intended normal architecture:
 
 `flexible semantic AI -> deterministic Food Resolver -> trusted Food ID -> Food Master`
 
-## Still open before real Live wiring
+## Immediate next test after v1.7.8
 
-- exact current API model identifier corresponding to the user's displayed `Gemini 3 Flash Live`
-- public-web authentication / ephemeral-token strategy
-- exact SDK vs raw-WebSocket implementation path
-- VAD/end-of-turn tuning
-- barge-in/interruption behavior
-- idle timeout and grace timing
-- pagehide/background behavior
-- reconnect/session resumption
-- network-failure UX
-- whether Live remains open after successful registration
-- Android Chrome microphone lifecycle
-- actual function-declaration compatibility test against the real Live API
-
-## Next development step
-
-Do not integrate production yet.
-
-Next logical sandbox phase is to build the real Live transport boundary behind an interface while keeping a mock transport, then verify the exact current Gemini model identifier/authentication requirements and perform a minimal real API handshake/tool-call experiment. Only after that should the Live transport be connected to microphone/audio and existing UI.
-
-Production integration must later start from a new Fresh GitHub snapshot and follow branch -> diff/PR -> real-device review -> main merge.
+- verify dedicated Transcribe Live reaches ready state
+- compare displayed Japanese transcript accuracy against v1.7.7
+- verify conversational reasoning / audio / Function Calling remain unchanged
+- reproduce the buzzer and inspect the visible audio-event trace immediately afterward
+- only then decide whether the remaining tone is local playback, protocol interruption, or likely model-originated audio
