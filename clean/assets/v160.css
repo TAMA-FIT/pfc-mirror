@@ -1,0 +1,25 @@
+/* PFC Mirror v1.6.0 — senior integration layer */
+.v160-legacy-target-form{position:absolute!important;width:1px!important;height:1px!important;overflow:hidden!important;clip:rect(0 0 0 0)!important;clip-path:inset(50%)!important;white-space:nowrap!important}
+.v160-target-panel{background:#fff;border:1px solid #dbe9e1;border-radius:20px;padding:18px;margin-bottom:16px;box-shadow:0 8px 24px rgba(20,80,52,.07)}
+.v160-panel-head{display:flex;justify-content:space-between;align-items:flex-end;gap:12px;margin-bottom:15px}
+.v160-panel-head span,.v160-mode-title{display:block;font-weight:900;color:#187a51;font-size:14px}
+.v160-panel-head strong{display:block;margin-top:3px;font-size:22px;color:#18342a}
+.v160-panel-head small{color:#6e7e76;font-weight:700;text-align:right}
+.v160-cal-presets{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.v160-cal-btn{min-height:82px;border:1px solid #dce7e1;border-radius:16px;background:#fff;color:#18342a;padding:10px}
+.v160-cal-btn span{display:block;font-size:13px;font-weight:800;color:#6d7b74}.v160-cal-btn strong{font-size:27px;line-height:1.15}.v160-cal-btn small{font-size:12px;font-weight:800}
+.v160-cal-btn.is-selected,.v160-mode-btn.is-selected{border:2px solid #187a51;background:#eaf7f0;color:#126341}
+.v160-mode-title{margin:18px 0 9px}.v160-mode-presets{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.v160-mode-btn{min-height:54px;border:1px solid #dce7e1;border-radius:14px;background:#fff;color:#18342a;font-weight:900}
+.v160-custom{margin-top:17px;padding-top:16px;border-top:1px solid #e5ece8}.v160-custom label{font-size:14px;font-weight:800;color:#50635a}
+.v160-custom label>span{display:flex;align-items:center;gap:7px;margin-top:7px}.v160-custom input{width:100%;min-height:52px;border:1px solid #cad9d1;border-radius:13px;padding:0 13px;font-size:22px;font-weight:900}
+.v160-custom button{width:100%;min-height:54px;margin-top:9px;border:0;border-radius:14px;background:#187a51;color:#fff;font-weight:900}
+.v160-alcohol-card{margin-top:10px;padding:14px 16px;border-radius:16px;background:#f5f0fb;border:1px solid #e4d8f0;color:#3f3150;display:grid;grid-template-columns:1fr auto;align-items:center;gap:3px 12px}
+.v160-alcohol-card>div{display:flex;gap:9px;align-items:center}.v160-alcohol-card>div span{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:#8b5aae;color:#fff;font-weight:900;font-size:18px}
+.v160-alcohol-card>div strong{font-size:16px}.v160-alcohol-card>b{font-size:26px;color:#744894}.v160-alcohol-card>b small{font-size:13px;margin-left:2px}
+.v160-alcohol-card p{grid-column:1/-1;margin:2px 0 0;color:#756881;font-size:12px;font-weight:700}
+.v160-history-a{margin-top:8px;padding:8px 10px;border-radius:10px;background:#f5f0fb;color:#744894;font-weight:900;font-size:13px}.v160-history-a span{font-weight:700;color:#7d7186;margin-left:5px}
+.v160-version-tap{user-select:none;-webkit-user-select:none}.v160-manager{border:2px dashed #7b638f!important;background:#fbf8fd!important}.v160-manager h2{color:#624779}
+.v160-manager-actions{display:grid;grid-template-columns:1fr 1fr;gap:9px}.v160-manager-actions button{min-height:52px;border:1px solid #d8cce2;border-radius:13px;background:#fff;color:#553d69;font-weight:900}
+.v160-manager-actions .danger{grid-column:1/-1;color:#aa3838;background:#fff4f4;border-color:#f0cccc}
+@media(max-width:380px){.v160-target-panel{padding:14px}.v160-panel-head{display:block}.v160-panel-head small{display:block;text-align:left;margin-top:5px}.v160-cal-btn strong{font-size:24px}}
