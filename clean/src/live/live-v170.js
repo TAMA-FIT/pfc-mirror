@@ -1,9 +1,10 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.6';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.7';
 import { LiveMealDraft } from './draft-v170.js';
-import { GeminiLiveTransport } from './transport-v170.js?v=1.7.6';
-import { LiveAudioIO } from './audio-v170.js';
+import { GeminiLiveTransport } from './transport-v170.js?v=1.7.7';
+import { LiveAudioIO } from './audio-v170.js?v=1.7.7';
+import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.7';
 
 const draft=new LiveMealDraft();
 let transport=null;
@@ -12,6 +13,7 @@ let modal=null;
 let sessionState='idle';
 let lastUser='';
 let lastModel='';
+let transcriptSpeaker='none';
 let errorText='';
 let diagnosticText='';
 let registeredCount=0;
@@ -44,7 +46,7 @@ function loadCss(){
   const link=document.createElement('link');
   link.id='pfc-live-v170-css';
   link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.6',import.meta.url).href;
+  link.href=new URL('../../assets/live-v170.css?v=1.7.7',import.meta.url).href;
   document.head.appendChild(link);
 }
 
@@ -152,27 +154,47 @@ function handleCancellations(ids){
   for(const id of ids||[])changed=draft.cancelCall(id)||changed;
   if(changed)render();
 }
-function appendTranscript(current,addition){
-  const a=String(addition||'').trim();
-  if(!a)return current;
-  if(!current)return a;
-  if(current.endsWith(a))return current;
-  return `${current}${a}`;
+
+function acceptInputTranscript(text){
+  if(transcriptSpeaker!=='user'){
+    lastUser='';
+    lastModel='';
+    transcriptSpeaker='user';
+  }
+  lastUser=mergeTranscriptFragment(lastUser,text);
+  render();
+}
+
+function acceptOutputTranscript(text){
+  if(transcriptSpeaker!=='model'){
+    lastModel='';
+    transcriptSpeaker='model';
+  }
+  lastModel=mergeTranscriptFragment(lastModel,text);
+  render();
 }
 
 async function startLive(){
   if(transport)return;
-  errorText='';diagnosticText=`app ${LIVE_VERSION}`;registeredCount=0;lastUser='';lastModel='';draft.clear();
+  errorText='';diagnosticText=`app ${LIVE_VERSION}`;registeredCount=0;lastUser='';lastModel='';transcriptSpeaker='none';draft.clear();
   ensureModal().hidden=false;sessionState='token';render();
   try{
     audio=new LiveAudioIO();
     await audio.prepare();
     transport=new GeminiLiveTransport({
-      onState:s=>{sessionState=s;if(s==='turn-complete'){lastUser=lastUser.trim();lastModel=lastModel.trim()}render()},
+      onState:s=>{
+        sessionState=s;
+        if(s==='turn-complete'){
+          lastUser=lastUser.trim();
+          lastModel=lastModel.trim();
+          transcriptSpeaker='complete';
+        }
+        render();
+      },
       onDiagnostic:d=>{const text=formatDiagnostic(d);if(text)diagnosticText=text;render()},
       onAudio:(data,mime)=>audio?.play(data,mime),
-      onInputTranscript:t=>{lastUser=appendTranscript(lastUser,t);render()},
-      onOutputTranscript:t=>{lastModel=appendTranscript(lastModel,t);render()},
+      onInputTranscript:acceptInputTranscript,
+      onOutputTranscript:acceptOutputTranscript,
       onToolCall:handleToolCalls,
       onToolCancellation:handleCancellations,
       onInterrupted:()=>audio?.interruptOutput(),
@@ -203,7 +225,7 @@ async function registerDraft(){
   if(!records.length)return;
   writeRecords([...(current.records||[]),...records]);
   registeredCount+=records.length;
-  draft.clear();lastModel='';render();
+  draft.clear();lastModel='';transcriptSpeaker='complete';render();
   transport?.sendText(`__PFC_DRAFT_COMMITTED__ ユーザー操作で${records.length}件の食事を登録しました。現在のDraftは空です。以前のrefは今後update/removeに使わないでください。短く「登録しました」と伝え、追加があればそのまま聞いてください。`);
 }
 
