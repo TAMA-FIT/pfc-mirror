@@ -56,7 +56,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.5');
+          assert.equal(LIVE_VERSION, 'v1.7.6');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
@@ -64,6 +64,31 @@ jobs:
           assert.equal(message.setup.tools[0].functionDeclarations[0].name, 'update_meal_draft');
           assert.equal(message.setup.realtimeInputConfig.automaticActivityDetection.silenceDurationMs, 900);
           console.log('Gemini Live setup contract: OK');
+          NODE
+      - name: Live WebSocket frame decoding
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { decodeWebSocketMessage } from './clean/src/live/transport-v170.js';
+
+          assert.deepEqual(
+            await decodeWebSocketMessage('{"setupComplete":{}}'),
+            { setupComplete: {} }
+          );
+
+          const blob = new Blob(['{"serverContent":{"turnComplete":true}}'], { type: 'application/json' });
+          assert.deepEqual(
+            await decodeWebSocketMessage(blob),
+            { serverContent: { turnComplete: true } }
+          );
+
+          const arrayBuffer = new TextEncoder().encode('{"goAway":{"timeLeft":"1s"}}').buffer;
+          assert.deepEqual(
+            await decodeWebSocketMessage(arrayBuffer),
+            { goAway: { timeLeft: '1s' } }
+          );
+
+          console.log('Gemini Live WebSocket frame decoding: OK');
           NODE
       - name: Live diagnostics and GAS fetch contract
         run: |
@@ -78,6 +103,9 @@ jobs:
           assert.match(transport, /redirect:'follow'/);
           assert.doesNotMatch(transport, /Accept':'application\/json'/);
           assert.doesNotMatch(transport, /cache:'no-store'/);
+          assert.match(transport, /decodeWebSocketMessage/);
+          assert.match(transport, /data instanceof Blob/);
+          assert.match(transport, /data instanceof ArrayBuffer/);
           assert.match(transport, /onDiagnostic/);
           assert.match(live, /pfc-live-diagnostic/);
           assert.match(live, /app \$\{LIVE_VERSION\}/);

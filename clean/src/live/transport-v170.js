@@ -1,4 +1,4 @@
-import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.4';
+import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.6';
 
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
@@ -8,6 +8,22 @@ function bytesToBase64(bytes) {
   const CHUNK=0x8000;
   for (let i=0;i<u8.length;i+=CHUNK) s += String.fromCharCode(...u8.subarray(i,i+CHUNK));
   return btoa(s);
+}
+
+export async function decodeWebSocketMessage(data) {
+  let text;
+  if (typeof data === 'string') {
+    text=data;
+  } else if (typeof Blob !== 'undefined' && data instanceof Blob) {
+    text=await data.text();
+  } else if (data instanceof ArrayBuffer) {
+    text=new TextDecoder().decode(data);
+  } else if (ArrayBuffer.isView(data)) {
+    text=new TextDecoder().decode(data);
+  } else {
+    throw new TypeError(`Unsupported WebSocket message type: ${Object.prototype.toString.call(data)}`);
+  }
+  return JSON.parse(text);
 }
 
 function safeDiagnostic(body={}) {
@@ -112,7 +128,7 @@ export class GeminiLiveTransport {
 
       ws.onmessage=async event=>{
         try{
-          const msg=JSON.parse(event.data);
+          const msg=await decodeWebSocketMessage(event.data);
           if (msg.setupComplete) {
             this.ready=true;
             this.onDiagnostic({stage:'setup',ok:true,message:'setupComplete'});
