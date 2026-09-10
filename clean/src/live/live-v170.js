@@ -17,7 +17,7 @@ let diagnosticText='';
 let registeredCount=0;
 let patchQueued=false;
 
-function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[m]))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function statusText(){
   if(errorText)return errorText;
   if(sessionState==='token')return '接続の準備をしています…';
