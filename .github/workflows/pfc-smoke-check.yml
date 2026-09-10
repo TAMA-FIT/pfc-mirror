@@ -27,6 +27,7 @@ jobs:
           node --check clean/src/live/draft-v170.js
           node --check clean/src/live/transport-v170.js
           node --check clean/src/live/audio-v170.js
+          node --check clean/src/live/transcript-v177.js
           node --check clean/src/live/live-v170.js
       - name: Target contracts
         run: |
@@ -56,7 +57,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.6');
+          assert.equal(LIVE_VERSION, 'v1.7.7');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
@@ -90,6 +91,32 @@ jobs:
 
           console.log('Gemini Live WebSocket frame decoding: OK');
           NODE
+      - name: Live transcript coalescing
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { mergeTranscriptFragment } from './clean/src/live/transcript-v177.js';
+
+          assert.equal(mergeTranscriptFragment('', '鶏胸肉'), '鶏胸肉');
+          assert.equal(mergeTranscriptFragment('今日は鶏胸', '今日は鶏胸肉200g'), '今日は鶏胸肉200g');
+          assert.equal(mergeTranscriptFragment('鶏胸肉ですね。皮は', '皮はありですか？'), '鶏胸肉ですね。皮はありですか？');
+          assert.equal(mergeTranscriptFragment('納豆はどのくらいでしたか？', '納豆はどのくらいでしたか？'), '納豆はどのくらいでしたか？');
+          assert.equal(mergeTranscriptFragment('量は200', 'gです'), '量は200 gです');
+          console.log('Gemini Live transcript coalescing: OK');
+          NODE
+      - name: Live audio jitter scheduling
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { LIVE_AUDIO_PREROLL_SEC, LIVE_AUDIO_REBUFFER_THRESHOLD_SEC, nextPlaybackStart } from './clean/src/live/audio-v170.js';
+
+          assert.equal(LIVE_AUDIO_PREROLL_SEC, 0.12);
+          assert.equal(LIVE_AUDIO_REBUFFER_THRESHOLD_SEC, 0.035);
+          assert.ok(Math.abs(nextPlaybackStart(10, 0) - 10.12) < 1e-9);
+          assert.ok(Math.abs(nextPlaybackStart(10, 10.2) - 10.2) < 1e-9);
+          assert.ok(Math.abs(nextPlaybackStart(10, 10.01) - 10.12) < 1e-9);
+          console.log('Gemini Live audio jitter scheduling: OK');
+          NODE
       - name: Live diagnostics and GAS fetch contract
         run: |
           node --input-type=module <<'NODE'
@@ -109,5 +136,7 @@ jobs:
           assert.match(transport, /onDiagnostic/);
           assert.match(live, /pfc-live-diagnostic/);
           assert.match(live, /app \$\{LIVE_VERSION\}/);
+          assert.match(live, /transcriptSpeaker/);
+          assert.match(live, /audio-v170\.js\?v=1\.7\.7/);
           console.log('Live diagnostics and GAS fetch contract: OK');
           NODE

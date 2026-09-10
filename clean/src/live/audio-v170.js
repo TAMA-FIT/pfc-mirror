@@ -28,15 +28,25 @@ function floatToPcm16(float32){
 
 function base64ToInt16(base64){
   const bin=atob(base64);
-  const buffer=new ArrayBuffer(bin.length);
+  const evenLength=bin.length-(bin.length%2);
+  const buffer=new ArrayBuffer(evenLength);
   const u8=new Uint8Array(buffer);
-  for(let i=0;i<bin.length;i++)u8[i]=bin.charCodeAt(i);
+  for(let i=0;i<evenLength;i++)u8[i]=bin.charCodeAt(i);
   return new Int16Array(buffer);
 }
 
 function mimeRate(mime){
   const m=String(mime||'').match(/rate=(\d+)/i);
   return m?Number(m[1]):24000;
+}
+
+export const LIVE_AUDIO_PREROLL_SEC=0.12;
+export const LIVE_AUDIO_REBUFFER_THRESHOLD_SEC=0.035;
+
+export function nextPlaybackStart(now,playAt,lead=LIVE_AUDIO_PREROLL_SEC,threshold=LIVE_AUDIO_REBUFFER_THRESHOLD_SEC){
+  const current=Number.isFinite(Number(now))?Number(now):0;
+  const queued=Number.isFinite(Number(playAt))?Number(playAt):0;
+  return queued>current+threshold?queued:current+lead;
 }
 
 export class LiveAudioIO{
@@ -78,6 +88,7 @@ export class LiveAudioIO{
   play(base64,mimeType='audio/pcm;rate=24000'){
     if(!this.ctx||!base64)return;
     const pcm=base64ToInt16(base64);
+    if(!pcm.length)return;
     const floats=new Float32Array(pcm.length);
     for(let i=0;i<pcm.length;i++)floats[i]=pcm[i]/32768;
     const rate=mimeRate(mimeType);
@@ -87,7 +98,7 @@ export class LiveAudioIO{
     node.buffer=buffer;
     node.connect(this.ctx.destination);
     const now=this.ctx.currentTime;
-    const start=Math.max(now+0.015,this.playAt);
+    const start=nextPlaybackStart(now,this.playAt);
     node.start(start);
     this.playAt=start+buffer.duration;
     this.outputNodes.add(node);
