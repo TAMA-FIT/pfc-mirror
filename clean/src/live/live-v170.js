@@ -1,13 +1,16 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.7';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.8';
 import { LiveMealDraft } from './draft-v170.js';
-import { GeminiLiveTransport } from './transport-v170.js?v=1.7.7';
-import { LiveAudioIO } from './audio-v170.js?v=1.7.7';
-import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.7';
+import { GeminiLiveTransport } from './transport-v170.js?v=1.7.8';
+import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
+import { LiveAudioIO } from './audio-v170.js?v=1.7.8';
+import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
 
 const draft=new LiveMealDraft();
 let transport=null;
+let transcriber=null;
+let transcriberReady=false;
 let audio=null;
 let modal=null;
 let sessionState='idle';
@@ -16,8 +19,14 @@ let lastModel='';
 let transcriptSpeaker='none';
 let errorText='';
 let diagnosticText='';
+let transcribeDiagnosticText='';
 let registeredCount=0;
 let patchQueued=false;
+let traceStartMs=0;
+let traceEvents=[];
+let lastAudioArrivalMs=0;
+let audioBurstCount=0;
+let audioChunkCount=0;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function statusText(){
@@ -41,12 +50,49 @@ function formatDiagnostic(d={}){
   return parts.filter(Boolean).join(' | ');
 }
 
+function traceStamp(){
+  if(!traceStartMs)return '0.0s';
+  return `${((performance.now()-traceStartMs)/1000).toFixed(1)}s`;
+}
+
+function addTrace(text,{renderNow=true}={}){
+  const entry=`${traceStamp()} ${text}`;
+  traceEvents.push(entry);
+  if(traceEvents.length>6)traceEvents.shift();
+  if(renderNow)render();
+}
+
+function handleLiveTrace(event={}){
+  const type=String(event.type||'');
+  if(type==='audio'){
+    const now=performance.now();
+    const countMatch=String(event.detail||'').match(/chunks=(\d+)/);
+    audioChunkCount+=countMatch?Number(countMatch[1]):1;
+    if(!lastAudioArrivalMs||now-lastAudioArrivalMs>700){
+      audioBurstCount++;
+      addTrace(`audio-start #${audioBurstCount}`,{renderNow:true});
+    }else{
+      const gap=now-lastAudioArrivalMs;
+      if(gap>140&&gap<700)addTrace(`audio-gap ${Math.round(gap)}ms`,{renderNow:true});
+    }
+    lastAudioArrivalMs=now;
+    return;
+  }
+  if(type==='tool-call')addTrace(`toolCall ${event.detail||''}`.trim());
+  else if(type==='tool-cancel')addTrace(`toolCancel ${event.detail||''}`.trim());
+  else if(type==='interrupted')addTrace('interrupted');
+  else if(type==='turn-complete')addTrace('turnComplete');
+  else if(type==='go-away')addTrace('goAway');
+  else if(type==='websocket-error')addTrace('ws-error');
+  else if(type==='websocket-close')addTrace(`ws-close ${event.detail||''}`.trim());
+}
+
 function loadCss(){
   if(document.getElementById('pfc-live-v170-css'))return;
   const link=document.createElement('link');
   link.id='pfc-live-v170-css';
   link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.7',import.meta.url).href;
+  link.href=new URL('../../assets/live-v170.css?v=1.7.8',import.meta.url).href;
   document.head.appendChild(link);
 }
 
@@ -81,6 +127,7 @@ function render(){
   if(!sheet)return;
   const items=draft.snapshot();
   const ready=draft.isReady();
+  const traceSummary=traceEvents.length?`${traceEvents.join(' → ')} | audio chunks=${audioChunkCount}`:'';
   sheet.innerHTML=`
     <div class="sv4-header pfc-live-head">
       <button type="button" class="close-btn" data-live-action="end" aria-label="終了">‹</button>
@@ -90,6 +137,8 @@ function render(){
     <div class="sv4-body">
       <div class="pfc-live-status">${esc(statusText())}</div>
       ${diagnosticText?`<div class="pfc-live-diagnostic"><strong>診断</strong><span>${esc(diagnosticText)}</span></div>`:''}
+      ${transcribeDiagnosticText?`<div class="pfc-live-diagnostic"><strong>文字起こし</strong><span>${esc(transcribeDiagnosticText)}</span></div>`:''}
+      ${traceSummary?`<div class="pfc-live-diagnostic"><strong>音声イベント</strong><span>${esc(traceSummary)}</span></div>`:''}
       <div class="pfc-live-conversation">
         ${lastUser?`<div><span>あなた</span><b>${esc(lastUser)}</b></div>`:''}
         ${lastModel?`<div class="model"><span>AI</span><b>${esc(lastModel)}</b></div>`:''}
@@ -174,9 +223,21 @@ function acceptOutputTranscript(text){
   render();
 }
 
+function handleTranscriberState(state){
+  if(state==='ready'){
+    transcriberReady=true;
+    transcribeDiagnosticText=`${TRANSCRIBE_MODEL} | ja-JP | SMART`;
+  }else if(state==='closed'){
+    transcriberReady=false;
+    if(sessionState!=='closed')transcribeDiagnosticText='専用文字起こしが終了しました。Live本体の文字起こしへフォールバックします。';
+  }
+  render();
+}
+
 async function startLive(){
   if(transport)return;
-  errorText='';diagnosticText=`app ${LIVE_VERSION}`;registeredCount=0;lastUser='';lastModel='';transcriptSpeaker='none';draft.clear();
+  errorText='';diagnosticText=`app ${LIVE_VERSION}`;transcribeDiagnosticText='専用文字起こしを準備しています…';registeredCount=0;lastUser='';lastModel='';transcriptSpeaker='none';draft.clear();
+  traceStartMs=performance.now();traceEvents=[];lastAudioArrivalMs=0;audioBurstCount=0;audioChunkCount=0;transcriberReady=false;
   ensureModal().hidden=false;sessionState='token';render();
   try{
     audio=new LiveAudioIO();
@@ -193,21 +254,52 @@ async function startLive(){
       },
       onDiagnostic:d=>{const text=formatDiagnostic(d);if(text)diagnosticText=text;render()},
       onAudio:(data,mime)=>audio?.play(data,mime),
-      onInputTranscript:acceptInputTranscript,
+      onInputTranscript:t=>{if(!transcriberReady)acceptInputTranscript(t)},
       onOutputTranscript:acceptOutputTranscript,
       onToolCall:handleToolCalls,
       onToolCancellation:handleCancellations,
       onInterrupted:()=>audio?.interruptOutput(),
+      onTrace:handleLiveTrace,
       onError:e=>{errorText=`Liveエラー: ${String(e?.message||e)}`;render()}
     });
     await transport.connect();
-    await audio.startCapture(bytes=>transport?.sendAudio(bytes));
+
+    try{
+      transcriber=new GeminiLiveTranscriber({
+        onState:handleTranscriberState,
+        onFinal:acceptInputTranscript,
+        onInterim:()=>{},
+        onDiagnostic:d=>{
+          if(d.stage==='transcribe-setup'&&d.ok)transcribeDiagnosticText=`${TRANSCRIBE_MODEL} | ja-JP | SMART`;
+          else if(!d.ok)transcribeDiagnosticText=formatDiagnostic(d);
+          render();
+        },
+        onError:e=>{
+          transcriberReady=false;
+          transcribeDiagnosticText=`専用文字起こしエラー: ${String(e?.message||e)} | Live本体へフォールバック`;
+          render();
+        }
+      });
+      await transcriber.connect();
+    }catch(e){
+      try{transcriber?.close()}catch{}
+      transcriber=null;
+      transcriberReady=false;
+      transcribeDiagnosticText=`専用文字起こしに接続できません: ${String(e?.message||e)} | Live本体へフォールバック`;
+      render();
+    }
+
+    await audio.startCapture(bytes=>{
+      transport?.sendAudio(bytes);
+      transcriber?.sendAudio(bytes);
+    });
     transport.sendOpening();
     sessionState='ready';render();
   }catch(e){
     const d=e?.liveDiagnostic?formatDiagnostic({stage:'token',ok:false,...e.liveDiagnostic}):'';
     if(d)diagnosticText=d;
     errorText=`接続できません: ${String(e?.message||e)}`;sessionState='error';
+    try{transcriber?.close()}catch{}transcriber=null;transcriberReady=false;
     try{transport?.close()}catch{}transport=null;
     try{await audio?.close()}catch{}audio=null;render();
   }
@@ -230,6 +322,7 @@ async function registerDraft(){
 }
 
 async function endLive(){
+  try{transcriber?.close()}catch{}transcriber=null;transcriberReady=false;
   try{transport?.close()}catch{}transport=null;
   try{await audio?.close()}catch{}audio=null;
   draft.clear();sessionState='closed';if(modal)modal.hidden=true;location.reload();
@@ -245,9 +338,13 @@ document.addEventListener('click',e=>{
   else if(action==='remove'){e.preventDefault();draft.removeLocal(button.dataset.ref);render()}
 });
 
-addEventListener('pagehide',()=>{try{transport?.close()}catch{}transport=null;try{audio?.stopCapture()}catch{}});
+addEventListener('pagehide',()=>{
+  try{transcriber?.close()}catch{}transcriber=null;transcriberReady=false;
+  try{transport?.close()}catch{}transport=null;
+  try{audio?.stopCapture()}catch{}
+});
 loadCss();ensureModal();
 const observer=new MutationObserver(queuePatch);
 for(const id of ['view-home','view-settings']){const el=document.getElementById(id);if(el)observer.observe(el,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']})}
 queuePatch();
-console.info('[PFC Gemini Live experiment]',{version:LIVE_VERSION});
+console.info('[PFC Gemini Live experiment]',{version:LIVE_VERSION,transcriber:TRANSCRIBE_MODEL});
