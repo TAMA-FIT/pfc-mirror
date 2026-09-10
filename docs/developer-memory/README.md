@@ -13,7 +13,7 @@ Start in this order:
 1. Read this file.
 2. Read `CURRENT_STATE.md`.
 3. Read `DEVELOPMENT_PROTOCOL.md`.
-4. If working on Gemini Live, also read `GEMINI_LIVE_SANDBOX.md`.
+4. If working on Gemini Live, read `GEMINI_LIVE_SANDBOX.md` and then `GEMINI_LIVE_TRANSPORT_V05.md`.
 5. Fetch a Fresh GitHub `main` ref and the exact production files relevant to the task.
 6. Compare Fresh GitHub state with the state recorded here.
 7. If they differ, Fresh GitHub wins for code/version state; update this memory after the work is complete.
