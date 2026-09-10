@@ -26,6 +26,7 @@ jobs:
           node --check clean/src/live/config-v170.js
           node --check clean/src/live/draft-v170.js
           node --check clean/src/live/transport-v170.js
+          node --check clean/src/live/transcribe-v178.js
           node --check clean/src/live/audio-v170.js
           node --check clean/src/live/transcript-v177.js
           node --check clean/src/live/live-v170.js
@@ -57,7 +58,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.7');
+          assert.equal(LIVE_VERSION, 'v1.7.8');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
@@ -65,6 +66,32 @@ jobs:
           assert.equal(message.setup.tools[0].functionDeclarations[0].name, 'update_meal_draft');
           assert.equal(message.setup.realtimeInputConfig.automaticActivityDetection.silenceDurationMs, 900);
           console.log('Gemini Live setup contract: OK');
+          NODE
+      - name: Dedicated Live Transcribe contract
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {
+            TRANSCRIBE_MODEL,
+            TRANSCRIBE_LANGUAGE,
+            TRANSCRIBE_MODE,
+            TRANSCRIBE_CUSTOM_VOCABULARY,
+            buildTranscribeSetupMessage
+          } from './clean/src/live/transcribe-v178.js';
+
+          assert.equal(TRANSCRIBE_MODEL, 'gemini-3.5-transcribe-live');
+          assert.equal(TRANSCRIBE_LANGUAGE, 'ja-JP');
+          assert.equal(TRANSCRIBE_MODE, 'SMART');
+          assert.ok(TRANSCRIBE_CUSTOM_VOCABULARY.includes('鶏胸肉'));
+          assert.ok(TRANSCRIBE_CUSTOM_VOCABULARY.includes('納豆'));
+          assert.ok(TRANSCRIBE_CUSTOM_VOCABULARY.length <= 100);
+          const message = buildTranscribeSetupMessage();
+          assert.equal(message.setup.model, 'models/gemini-3.5-transcribe-live');
+          assert.deepEqual(message.setup.generationConfig.responseModalities, ['TEXT']);
+          assert.deepEqual(message.setup.inputAudioTranscription.languageCodes, ['ja-JP']);
+          assert.equal(message.setup.inputAudioTranscription.mode, 'SMART');
+          assert.deepEqual(message.setup.inputAudioTranscription.customVocabulary, TRANSCRIBE_CUSTOM_VOCABULARY);
+          console.log('Gemini 3.5 Transcribe Live contract: OK');
           NODE
       - name: Live WebSocket frame decoding
         run: |
@@ -124,8 +151,10 @@ jobs:
           import fs from 'node:fs';
 
           const transport = fs.readFileSync('./clean/src/live/transport-v170.js', 'utf8');
+          const transcribe = fs.readFileSync('./clean/src/live/transcribe-v178.js', 'utf8');
           const live = fs.readFileSync('./clean/src/live/live-v170.js', 'utf8');
           assert.match(transport, /taskType:'liveToken'/);
+          assert.match(transport, /export async function issueLiveToken/);
           assert.match(transport, /'Content-Type':'text\/plain'/);
           assert.match(transport, /redirect:'follow'/);
           assert.doesNotMatch(transport, /Accept':'application\/json'/);
@@ -133,10 +162,17 @@ jobs:
           assert.match(transport, /decodeWebSocketMessage/);
           assert.match(transport, /data instanceof Blob/);
           assert.match(transport, /data instanceof ArrayBuffer/);
-          assert.match(transport, /onDiagnostic/);
+          assert.match(transport, /onTrace/);
+          assert.match(transcribe, /gemini-3\.5-transcribe-live/);
+          assert.match(transcribe, /languageCodes: \[TRANSCRIBE_LANGUAGE\]/);
+          assert.match(transcribe, /mode: TRANSCRIBE_MODE/);
+          assert.match(live, /GeminiLiveTranscriber/);
+          assert.match(live, /transport\?\.sendAudio\(bytes\)/);
+          assert.match(live, /transcriber\?\.sendAudio\(bytes\)/);
+          assert.match(live, /if\(!transcriberReady\)acceptInputTranscript\(t\)/);
           assert.match(live, /pfc-live-diagnostic/);
+          assert.match(live, /音声イベント/);
           assert.match(live, /app \$\{LIVE_VERSION\}/);
-          assert.match(live, /transcriptSpeaker/);
-          assert.match(live, /audio-v170\.js\?v=1\.7\.7/);
-          console.log('Live diagnostics and GAS fetch contract: OK');
+          assert.match(live, /audio-v170\.js\?v=1\.7\.8/);
+          console.log('Live diagnostics, dual-stream, and GAS fetch contract: OK');
           NODE

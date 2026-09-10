@@ -1,4 +1,4 @@
-import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.7';
+import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.8';
 
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
@@ -47,7 +47,7 @@ function diagnosticMessage(diagnostic) {
   return parts.join(' | ');
 }
 
-async function issueToken() {
+export async function issueLiveToken() {
   const response = await fetch(GAS_URL, {
     method:'POST',
     headers:{'Content-Type':'text/plain'},
@@ -78,9 +78,9 @@ async function issueToken() {
 export class GeminiLiveTransport {
   constructor({
     onState=()=>{},onAudio=()=>{},onInputTranscript=()=>{},onOutputTranscript=()=>{},
-    onToolCall=()=>{},onToolCancellation=()=>{},onInterrupted=()=>{},onError=()=>{},onDiagnostic=()=>{}
+    onToolCall=()=>{},onToolCancellation=()=>{},onInterrupted=()=>{},onError=()=>{},onDiagnostic=()=>{},onTrace=()=>{}
   }={}) {
-    Object.assign(this,{onState,onAudio,onInputTranscript,onOutputTranscript,onToolCall,onToolCancellation,onInterrupted,onError,onDiagnostic});
+    Object.assign(this,{onState,onAudio,onInputTranscript,onOutputTranscript,onToolCall,onToolCancellation,onInterrupted,onError,onDiagnostic,onTrace});
     this.ws=null;
     this.ready=false;
   }
@@ -94,7 +94,7 @@ export class GeminiLiveTransport {
     this.onState('token');
     let tokenResult;
     try {
-      tokenResult=await issueToken();
+      tokenResult=await issueLiveToken();
       this.onDiagnostic({stage:'token',ok:true,...tokenResult.diagnostic});
     } catch (error) {
       if (error?.liveDiagnostic) this.onDiagnostic({stage:'token',ok:false,...error.liveDiagnostic});
@@ -118,6 +118,7 @@ export class GeminiLiveTransport {
       ws.onopen=()=>{
         try {
           this.onDiagnostic({stage:'websocket',ok:true,message:'WebSocket open'});
+          this.onTrace({type:'websocket-open'});
           this.onState('setup');
           this.sendObject(buildSetupMessage());
         } catch (e) {
@@ -132,6 +133,7 @@ export class GeminiLiveTransport {
           if (msg.setupComplete) {
             this.ready=true;
             this.onDiagnostic({stage:'setup',ok:true,message:'setupComplete'});
+            this.onTrace({type:'setup-complete'});
             this.onState('ready');
             if (!settled) {
               settled=true;
@@ -149,6 +151,7 @@ export class GeminiLiveTransport {
       ws.onerror=()=>{
         const e=new Error('Gemini Live WebSocket error');
         this.onDiagnostic({stage:'websocket',ok:false,message:e.message});
+        this.onTrace({type:'websocket-error'});
         this.onError(e);
         if (!settled) {
           settled=true;
@@ -160,6 +163,7 @@ export class GeminiLiveTransport {
       ws.onclose=e=>{
         this.ready=false;
         this.onDiagnostic({stage:'websocket-close',ok:e.code===1000,message:`code=${e.code}${e.reason?` reason=${e.reason}`:''}`});
+        this.onTrace({type:'websocket-close',detail:`code=${e.code}`});
         this.onState('closed',{code:e.code,reason:e.reason});
         if (!settled) {
           settled=true;
@@ -171,19 +175,39 @@ export class GeminiLiveTransport {
   }
 
   async handleMessage(msg) {
-    if (msg.toolCall?.functionCalls) await this.onToolCall(msg.toolCall.functionCalls);
-    if (msg.toolCallCancellation?.ids) this.onToolCancellation(msg.toolCallCancellation.ids);
+    if (msg.toolCall?.functionCalls) {
+      this.onTrace({type:'tool-call',detail:`count=${msg.toolCall.functionCalls.length}`});
+      await this.onToolCall(msg.toolCall.functionCalls);
+    }
+    if (msg.toolCallCancellation?.ids) {
+      this.onTrace({type:'tool-cancel',detail:`count=${msg.toolCallCancellation.ids.length}`});
+      this.onToolCancellation(msg.toolCallCancellation.ids);
+    }
     if (msg.serverContent) {
       const s=msg.serverContent;
       if (s.inputTranscription?.text) this.onInputTranscript(s.inputTranscription.text);
       if (s.outputTranscription?.text) this.onOutputTranscript(s.outputTranscription.text);
+      let audioChunks=0;
       for (const part of s.modelTurn?.parts || []) {
-        if (part?.inlineData?.data) this.onAudio(part.inlineData.data,part.inlineData.mimeType || 'audio/pcm;rate=24000');
+        if (part?.inlineData?.data) {
+          audioChunks++;
+          this.onAudio(part.inlineData.data,part.inlineData.mimeType || 'audio/pcm;rate=24000');
+        }
       }
-      if (s.interrupted) this.onInterrupted();
-      if (s.turnComplete) this.onState('turn-complete');
+      if (audioChunks) this.onTrace({type:'audio',detail:`chunks=${audioChunks}`});
+      if (s.interrupted) {
+        this.onTrace({type:'interrupted'});
+        this.onInterrupted();
+      }
+      if (s.turnComplete) {
+        this.onTrace({type:'turn-complete'});
+        this.onState('turn-complete');
+      }
     }
-    if (msg.goAway) this.onState('go-away',msg.goAway);
+    if (msg.goAway) {
+      this.onTrace({type:'go-away'});
+      this.onState('go-away',msg.goAway);
+    }
   }
 
   sendOpening() { this.sendObject(buildOpeningMessage()); }
