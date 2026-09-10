@@ -1,4 +1,4 @@
-import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.2';
+import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v170.js?v=1.7.3';
 
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
 
