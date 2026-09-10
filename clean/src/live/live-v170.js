@@ -1,8 +1,8 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.5';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.6';
 import { LiveMealDraft } from './draft-v170.js';
-import { GeminiLiveTransport } from './transport-v170.js?v=1.7.4';
+import { GeminiLiveTransport } from './transport-v170.js?v=1.7.6';
 import { LiveAudioIO } from './audio-v170.js';
 
 const draft=new LiveMealDraft();
@@ -17,7 +17,7 @@ let diagnosticText='';
 let registeredCount=0;
 let patchQueued=false;
 
-function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[m]))}
 function statusText(){
   if(errorText)return errorText;
   if(sessionState==='token')return '接続の準備をしています…';
@@ -44,7 +44,7 @@ function loadCss(){
   const link=document.createElement('link');
   link.id='pfc-live-v170-css';
   link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.4',import.meta.url).href;
+  link.href=new URL('../../assets/live-v170.css?v=1.7.6',import.meta.url).href;
   document.head.appendChild(link);
 }
 
