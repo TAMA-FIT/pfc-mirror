@@ -1,0 +1,46 @@
+name: PFC smoke check
+
+on:
+  pull_request:
+    paths:
+      - 'clean/**/*.js'
+      - 'clean/**/*.html'
+      - 'index.html'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check v1.6 runtime
+        run: |
+          node --check clean/src/features/targets-v160.js
+          node --check clean/src/dev/manager-v160.js
+          node --check clean/src/v160.js
+          node --check clean/src/main-v160.js
+      - name: Target contracts
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { calculateTarget } from './clean/src/features/targets-v160.js';
+
+          const std = calculateTarget(2000, 'std');
+          assert.equal(std.p, 150);
+          assert.equal(std.f, 44.4);
+          assert.equal(std.c, 250);
+
+          const lowfat = calculateTarget(1600, 'lowfat');
+          assert.equal(lowfat.p, 120);
+          assert.equal(lowfat.f, 17.8);
+          assert.equal(lowfat.c, 240);
+
+          const keto = calculateTarget(1200, 'keto');
+          assert.equal(keto.p, 90);
+          assert.equal(keto.f, 80);
+          assert.equal(keto.c, 30);
+          console.log('PFC target contracts: OK');
+          NODE

@@ -1,8 +1,8 @@
 import { readState, writeHistory, writeBody, writeRecords, writeTargets } from './storage.js';
 import { CALORIE_PRESETS, PFC_MODES, calculateTarget, inferMode, targetLabel } from './features/targets-v160.js';
-import { generateRealisticHistory, generateRealisticBody, removeDummy } from './dev/manager-v160.js';
+import { generateRealisticHistory, generateRealisticBody } from './dev/manager-v160.js';
 
-const VERSION = 'v1.6.0';
+const VERSION = 'v1.6.1';
 const $ = s => document.querySelector(s);
 let devTapCount = 0;
 let devTapTimer = null;
@@ -21,6 +21,11 @@ function safeRead(key, fallback = []) {
 function currentTargets() {
   const state = readState();
   return state.targets;
+}
+
+function isDummyHistoryRow(row) {
+  if (row?.isDummy === true) return true;
+  return Array.isArray(row?.l) && row.l.length > 0 && row.l.every(record => record?.isDummy === true);
 }
 
 function pfcPresetHtml() {
@@ -68,14 +73,18 @@ function patchSettings() {
   const old = $('#target-form');
   if (old && !view.querySelector('.v160-target-panel')) {
     old.insertAdjacentHTML('beforebegin', pfcPresetHtml());
-    old.classList.add('v160-legacy-target-form');
   }
+  if (old && !old.hidden) old.hidden = true;
 
   const runtime = view.querySelector('.runtime-panel');
   if (runtime) {
     runtime.classList.add('v160-version-tap');
     const p = runtime.querySelector('p');
-    if (p) p.innerHTML = p.innerHTML.replace(/v1\.5\.1/g, VERSION);
+    if (p) {
+      const current = p.innerHTML;
+      const next = current.replace(/v1\.5\.1|v1\.6\.0/g, VERSION);
+      if (next !== current) p.innerHTML = next;
+    }
     if (managerVisible && !view.querySelector('.v160-manager')) {
       runtime.insertAdjacentHTML('afterend', managerHtml());
     }
@@ -87,22 +96,29 @@ function patchHome() {
   if (!view || view.hidden) return;
   const targets = currentTargets();
   const label = view.querySelector('.tgt-value');
-  if (label) label.textContent = targetLabel(targets);
+  const nextLabel = targetLabel(targets);
+  if (label && label.textContent !== nextLabel) label.textContent = nextLabel;
 
   const records = safeRead('tf_dat', []);
   const alcohol = records.reduce((s, x) => s + Math.max(0, Number(x?.A)||0), 0);
   const grid = view.querySelector('.pfc-mini-grid');
-  if (grid) {
-    view.querySelector('.v160-alcohol-card')?.remove();
-    if (alcohol > 0.01) {
-      grid.insertAdjacentHTML('afterend', `
-        <div class="v160-alcohol-card">
-          <div><span>A</span><strong>アルコール</strong></div>
-          <b>${Math.round(alcohol*10)/10}<small>g</small></b>
-          <p>純アルコール量・約 ${Math.round(alcohol*7)} kcal相当</p>
-        </div>`);
-    }
+  if (!grid) return;
+
+  const existing = view.querySelector('.v160-alcohol-card');
+  if (!(alcohol > 0.01)) {
+    existing?.remove();
+    return;
   }
+
+  const rounded = Math.round(alcohol * 10) / 10;
+  if (existing?.dataset.alcohol === String(rounded)) return;
+  existing?.remove();
+  grid.insertAdjacentHTML('afterend', `
+    <div class="v160-alcohol-card" data-alcohol="${rounded}">
+      <div><span>A</span><strong>アルコール</strong></div>
+      <b>${rounded}<small>g</small></b>
+      <p>純アルコール量・約 ${Math.round(alcohol*7)} kcal相当</p>
+    </div>`);
 }
 
 function patchHistory() {
@@ -115,14 +131,20 @@ function patchHistory() {
     ...history.map(h => Number(h?.s?.A ?? h?.s?.a) || (h?.l||[]).reduce((s,x)=>s+Math.max(0,Number(x?.A)||0),0))
   ];
   view.querySelectorAll('.history-day').forEach((card, i) => {
-    card.querySelector('.v160-history-a')?.remove();
     const a = datasets[i] || 0;
-    if (a > 0.01) {
-      const details = card.querySelector('details');
-      const html = `<div class="v160-history-a">A ${Math.round(a*10)/10}g <span>純アルコール</span></div>`;
-      if (details) details.insertAdjacentHTML('beforebegin', html);
-      else card.insertAdjacentHTML('beforeend', html);
+    const existing = card.querySelector('.v160-history-a');
+    if (!(a > 0.01)) {
+      existing?.remove();
+      return;
     }
+
+    const rounded = Math.round(a * 10) / 10;
+    if (existing?.dataset.alcohol === String(rounded)) return;
+    existing?.remove();
+    const details = card.querySelector('details');
+    const html = `<div class="v160-history-a" data-alcohol="${rounded}">A ${rounded}g <span>純アルコール</span></div>`;
+    if (details) details.insertAdjacentHTML('beforebegin', html);
+    else card.insertAdjacentHTML('beforeend', html);
   });
 }
 
@@ -192,24 +214,29 @@ addEventListener('click', e => {
     const action = manager.dataset.v160Manager;
     const state = readState();
     if (action === 'clear') {
-      const cleaned = removeDummy(state.history, state.body, state.records);
-      writeHistory(cleaned.history);
-      writeBody(cleaned.body);
-      writeRecords(cleaned.today);
+      writeHistory(state.history.filter(x => !isDummyHistoryRow(x)));
+      writeBody(state.body.filter(x => x?.isDummy !== true));
+      writeRecords(state.records.filter(x => x?.isDummy !== true));
       location.reload();
       return;
     }
     const days = Number(action);
     if (days === 30 || days === 90) {
-      const realHistory = state.history.filter(x => !x?.isDummy);
-      const realBody = state.body.filter(x => !x?.isDummy);
+      const realHistory = state.history.filter(x => !isDummyHistoryRow(x));
+      const realBody = state.body.filter(x => x?.isDummy !== true);
       const generatedHistory = generateRealisticHistory({ days, targetCal:Number(state.targets.cal)||2000 });
       const lastBody = [...realBody].reverse().find(x => Number(x?.weight ?? x?.w) > 0);
-      const startWeight = Number(lastBody?.weight ?? lastBody?.w) || 70;
-      const startFat = Number(lastBody?.fat ?? lastBody?.bf) || 22;
-      const generatedBody = generateRealisticBody({ days, startWeight, startFat });
-      writeHistory([...generatedHistory, ...realHistory]);
-      writeBody([...realBody, ...generatedBody]);
+      const latestWeight = Number(lastBody?.weight ?? lastBody?.w) || 70;
+      const latestFat = Number(lastBody?.fat ?? lastBody?.bf) || 22;
+      const generatedBody = generateRealisticBody({
+        days,
+        startWeight: latestWeight + days * 0.018,
+        startFat: latestFat + days * 0.010
+      });
+      const combinedHistory = [...generatedHistory, ...realHistory].sort((a,b)=>String(b?.d||'').localeCompare(String(a?.d||'')));
+      const combinedBody = [...realBody, ...generatedBody].sort((a,b)=>String(a?.date||a?.d||'').localeCompare(String(b?.date||b?.d||'')));
+      writeHistory(combinedHistory);
+      writeBody(combinedBody);
       location.reload();
     }
   }
