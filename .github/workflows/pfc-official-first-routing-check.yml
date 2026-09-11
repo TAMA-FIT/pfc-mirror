@@ -25,19 +25,18 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
-            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517],
-            ['🍚主食','白米','ごはん ご飯 米','100g',2.5,0.3,37.1,168]
+            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
           ];
           const routing=await import('./clean/src/live/nutrition-routing-hotfix-v1721.js');
           const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?v=1.7.16');
 
           const generic=new LiveMealDraft();
-          let result=generic.applyFunctionCall({id:'rice',args:{operations:[{op:'add',name:'白米'}]}});
+          let result=generic.applyFunctionCall({id:'generic-fries',args:{operations:[{op:'add',name:'ポテト(L)'}]}});
           assert.equal(result.ready,true);
           assert.equal(result.draft[0].nutritionMode,'trusted-db');
 
           const branded=new LiveMealDraft();
-          result=branded.applyFunctionCall({id:'fries',args:{operations:[{op:'add',name:'ポテト(L)',sourceLabel:routing.OFFICIAL_SEARCH_MARKER}]}});
+          result=branded.applyFunctionCall({id:'official-fries',args:{operations:[{op:'add',name:'ポテト(L)',sourceLabel:routing.OFFICIAL_SEARCH_MARKER}]}});
           assert.equal(result.ready,false);
           assert.equal(result.draft[0].status,'unresolved');
           assert.equal(result.draft[0].nutritionMode,'pending');
