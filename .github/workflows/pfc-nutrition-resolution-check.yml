@@ -5,10 +5,12 @@ on:
     paths:
       - 'clean/src/live/config-v1720.js'
       - 'clean/src/live/draft-v1716.js'
+      - 'clean/src/live/generic-fallback-v1727.js'
       - 'clean/src/live/live-v1720.js'
       - 'clean/src/live/live-guard-v1720.js'
       - 'clean/src/live/nutrition-lookup-v1720.js'
       - 'clean/src/nutrition/evidence-v1716.js'
+      - 'clean/src/ui-polish-v1716.js'
       - 'clean/src/main-v160.js'
       - 'clean/index.html'
       - 'index.html'
@@ -28,10 +30,12 @@ jobs:
         run: |
           node --check clean/src/live/config-v1720.js
           node --check clean/src/live/draft-v1716.js
+          node --check clean/src/live/generic-fallback-v1727.js
           node --check clean/src/live/live-v1720.js
           node --check clean/src/live/live-guard-v1720.js
           node --check clean/src/live/nutrition-lookup-v1720.js
           node --check clean/src/nutrition/evidence-v1716.js
+          node --check clean/src/ui-polish-v1716.js
 
       - name: Gemini Live semantic-to-Tavily nutrition contract
         run: |
@@ -57,7 +61,8 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {normalizeNutritionEvidence,chooseNutritionMode,buildEvidenceRecord} from './clean/src/nutrition/evidence-v1716.js';
+          import {normalizeNutritionEvidence,chooseNutritionMode,buildEvidenceRecord,NUTRITION_EVIDENCE_TYPES} from './clean/src/nutrition/evidence-v1716.js';
+          assert.ok(NUTRITION_EVIDENCE_TYPES.includes('trusted-fallback'));
           const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:7,f:25.2,c:66,kcal:517,servingLabel:'Lサイズ',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/'});
           const unknown={name:'マックフライポテト',foodId:null,unresolved:true,needsSkin:false,needsAmount:false,amount:null,meal:'昼',nutritionEvidence:official};
           assert.equal(chooseNutritionMode(unknown).mode,'evidence');
@@ -65,9 +70,49 @@ jobs:
           assert.equal(record.Cal,517);
           assert.equal(record._clean.nutritionSource,'official-web');
           const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
+          assert.equal(chooseNutritionMode({...unknown,nutritionEvidence:estimate,brandProduct:true}).mode,'pending');
           const db={foodId:'food:1',unresolved:false,needsSkin:false,needsAmount:false,amount:1,unit:'個',meal:'昼',nutritionEvidence:estimate};
           assert.equal(chooseNutritionMode(db).mode,'trusted-db');
-          console.log('Official evidence precedence: OK');
+          console.log('Official/trusted fallback evidence precedence: OK');
+          NODE
+
+      - name: Branded product trusted generic fallback contract
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
+            ['🍔ジャンク・菓子','カレーライス','かれーらいす カレー ごはん 米','並',12,25,100,750],
+            ['🍔ジャンク・菓子','カツカレー','かつかれー カレー ごはん 米 肉','並',25,45,120,1100],
+            ['🍔ジャンク・菓子','ハンバーガー','はんばーがー マック まっく バーガー パン 肉','1個',13,9,30,256],
+            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517],
+            ['🍺酒・ジュース','コーヒー','こーひー 飲み物','1杯',0.2,0,0.7,4],
+            ['🍺酒・ジュース','コーラ','こーら ジュース 飲み物','1本',0,0,56,225]
+          ];
+          const fallback=await import('./clean/src/live/generic-fallback-v1727.js?test=1727');
+          const coco=fallback.buildTrustedGenericFallback('CoCo壱番屋 ポークカレー ライス300g 辛さ普通');
+          assert.ok(coco);
+          assert.equal(coco.genericName,'カレーライス');
+          assert.equal(coco.evidence.sourceType,'trusted-fallback');
+          assert.equal(coco.evidence.kcal,750);
+          assert.equal(fallback.buildTrustedGenericFallback('サムライマック 炙り醤油風 ダブル肉厚ビーフ'),null);
+
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1727');
+          const draft=new LiveMealDraft();
+          let result=draft.applyFunctionCall({id:'add',args:{operations:[{op:'add',name:'CoCo壱番屋 ポークカレー ライス300g 辛さ普通'}]}});
+          assert.equal(result.ready,false);
+          const ref=result.draft[0].ref;
+          result=draft.applyFunctionCall({id:'estimate',args:{operations:[{op:'update',ref,p:15.8,f:20.9,c:103.4,kcal:728,nutritionSource:'ai-estimate',sourceLabel:'AI推定',servingLabel:'1皿'}]}});
+          assert.equal(result.ready,true);
+          assert.equal(result.draft[0].nutritionEvidence.sourceType,'trusted-fallback');
+          assert.equal(result.draft[0].nutritionEvidence.kcal,750);
+          assert.equal(result.draft[0].genericFallback.genericName,'カレーライス');
+
+          const special=new LiveMealDraft();
+          result=special.applyFunctionCall({id:'s1',args:{operations:[{op:'add',name:'サムライマック 炙り醤油風 ダブル肉厚ビーフ'}]}});
+          const specialRef=result.draft[0].ref;
+          assert.throws(()=>special.applyFunctionCall({id:'s2',args:{operations:[{op:'update',ref:specialRef,p:30,f:20,c:40,kcal:500,nutritionSource:'ai-estimate',sourceLabel:'AI推定',servingLabel:'1個'}]}}),/AI estimate is blocked/);
+          assert.equal(special.isReady(),false);
+          console.log('Branded generic fallback + special-product block: OK');
           NODE
 
       - name: Tavily serial lookup contract
@@ -97,7 +142,7 @@ jobs:
           console.log('Tavily serial lookup contract: OK');
           NODE
 
-      - name: Runtime wiring and lookup cache-bust
+      - name: Runtime wiring and fallback cache-bust
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -115,5 +160,9 @@ jobs:
           const clean=fs.readFileSync('clean/index.html','utf8');
           assert.match(root,/nutrition-lookup-v1720\.js\?v=1\.7\.25":"\.\/clean\/src\/live\/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
           assert.match(clean,/nutrition-lookup-v1720\.js\?v=1\.7\.25":"\.\/src\/live\/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
-          console.log('Runtime wiring + lookup cache-bust: OK');
+          assert.match(root,/draft-v1716\.js\?v=1\.7\.24":"\.\/clean\/src\/live\/draft-v1716\.js\?v=1\.7\.27/);
+          assert.match(clean,/draft-v1716\.js\?v=1\.7\.24":"\.\/src\/live\/draft-v1716\.js\?v=1\.7\.27/);
+          assert.match(root,/evidence-v1716\.js\?v=1\.7\.24":"\.\/clean\/src\/nutrition\/evidence-v1716\.js\?v=1\.7\.27/);
+          assert.match(clean,/evidence-v1716\.js\?v=1\.7\.24":"\.\/src\/nutrition\/evidence-v1716\.js\?v=1\.7\.27/);
+          console.log('Runtime wiring + generic fallback cache-bust: OK');
           NODE
