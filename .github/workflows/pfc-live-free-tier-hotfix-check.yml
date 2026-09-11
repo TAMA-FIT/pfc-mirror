@@ -1,4 +1,4 @@
-name: PFC Live v1.7.20 grounded search check
+name: PFC Live v1.7.21 semantic grounded search check
 
 on:
   pull_request:
@@ -28,7 +28,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax check v1.7.20 runtime
+      - name: Syntax check v1.7.21 runtime
         run: |
           node --check clean/src/live/config-v1720.js
           node --check clean/src/live/transport-v1720.js
@@ -41,16 +41,18 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,buildSetupMessage} from './clean/src/live/config-v1720.js';
-          assert.equal(LIVE_VERSION,'v1.7.20');
+          assert.equal(LIVE_VERSION,'v1.7.21');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
           assert.equal(setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
           assert.equal(JSON.stringify(setup.tools).includes('googleSearch'),false);
           assert.match(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
-          assert.match(SYSTEM_INSTRUCTION,/すぐにAI推定値を作らないでください/);
+          assert.match(SYSTEM_INSTRUCTION,/普通のやつ/);
+          assert.match(SYSTEM_INSTRUCTION,/検索用の仮説/);
+          assert.match(SYSTEM_INSTRUCTION,/現行ラインナップ/);
           assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側/);
-          console.log('Live free-tier delegation policy: OK');
+          console.log('Live free-tier semantic delegation policy: OK');
           NODE
 
       - name: Grounded lookup response validation
@@ -58,14 +60,19 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
-          const {NUTRITION_LOOKUP_MODEL,buildNutritionLookupPayload,validateGroundedNutrition}=await import('./clean/src/live/nutrition-lookup-v1720.js');
+          const {NUTRITION_LOOKUP_MODEL,buildNutritionLookupPayload,validateGroundedNutrition,nutritionLookupCacheKey}=await import('./clean/src/live/nutrition-lookup-v1720.js');
           assert.equal(NUTRITION_LOOKUP_MODEL,'gemini-2.5-flash');
-          const payload=buildNutritionLookupPayload({foodName:'マックフライポテト L',contextText:'マックでポテトL'});
+          const payload=buildNutritionLookupPayload({foodName:'マックフライポテト L',contextText:'マックでポテトL',candidateNames:['マクドナルド マックフライポテト L']});
           assert.equal(payload.taskType,'nutritionLookup');
           assert.equal(payload.foodName,'マックフライポテト L');
-          const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp'});
+          assert.equal(payload.candidateNames[0],'マクドナルド マックフライポテト L');
+          const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp',resolutionNote:'Lサイズを公式商品へ照合'});
           assert.equal(verified.kcal,517);
           assert.equal(verified.f,25.2);
+          assert.match(verified.resolutionNote,/Lサイズ/);
+          const key1=nutritionLookupCacheKey(payload);
+          const key2=nutritionLookupCacheKey({...payload,candidateNames:['別候補']});
+          assert.notEqual(key1,key2);
           assert.throws(()=>validateGroundedNutrition({status:'verified',grounded:false,officialSource:true,kcal:1,p:0,f:0,c:0,sourceUrl:'https://example.com'}),/not grounded/);
           assert.throws(()=>validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,kcal:1,p:0,f:0,c:0,sourceUrl:''}),/sourceUrl/);
           console.log('Grounded nutrition client validation: OK');
@@ -78,7 +85,7 @@ jobs:
           globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
             ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
           ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?known=1720');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?known=1721');
           const draft=new LiveMealDraft();
           const result=draft.applyFunctionCall({id:'known',args:{operations:[{op:'add',name:'ポテト(L)'}]}});
           assert.equal(result.ready,true);
@@ -87,12 +94,25 @@ jobs:
           console.log('Generic Food Master path: OK');
           NODE
 
+      - name: Official evidence overrides generic DB but AI estimate does not
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {normalizeNutritionEvidence,chooseNutritionMode} from './clean/src/nutrition/evidence-v1716.js';
+          const base={foodId:'food:potato',unresolved:false,needsSkin:false,needsAmount:false,amount:1};
+          const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:7,f:25.2,c:66,kcal:517,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',servingLabel:'Lサイズ'});
+          assert.equal(chooseNutritionMode({...base,nutritionEvidence:official}).mode,'evidence');
+          const ai=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:5,f:25,c:67,kcal:517,servingLabel:'Lサイズ'});
+          assert.equal(chooseNutritionMode({...base,nutritionEvidence:ai}).mode,'trusted-db');
+          console.log('Official > generic DB > AI estimate precedence: OK');
+          NODE
+
       - name: Unknown product accepts app-only official evidence
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?official=1720');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?official=1721');
           const draft=new LiveMealDraft();
           let result=draft.applyFunctionCall({id:'unknown',args:{operations:[{op:'add',name:'サムライマック'}]}});
           assert.equal(result.ready,false);
@@ -115,14 +135,17 @@ jobs:
           assert.match(live,/startOfficialLookups/);
           assert.match(live,/lookupPendingFor/);
           assert.match(live,/lookupAttemptedForAll/);
+          assert.match(live,/candidateNames:candidates/);
+          assert.match(live,/ユーザー発話:/);
           assert.match(live,/nutritionSource:'official-web'/);
           assert.match(live,/if\(started>0\|\|lookupPendingFor\(items\)\)return/);
           assert.match(guard,/__PFC_OFFICIAL_LOOKUP_NOT_FOUND__/);
-          assert.match(guard,/最後の手段/);
-          console.log('Search-before-AI fallback ordering: OK');
+          assert.match(guard,/ブランド・チェーン・市販品/);
+          assert.match(guard,/すぐAI推定へ落とさず/);
+          console.log('Semantic search-before-AI ordering: OK');
           NODE
 
-      - name: GAS V13 security and quota contract
+      - name: GAS V13.1 flexible search security and quota contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -131,14 +154,15 @@ jobs:
           assert.match(gas,/gemini-2\.5-flash/);
           assert.match(gas,/google_search/);
           assert.match(gas,/GEMMA_API_KEY/);
-          assert.match(gas,/PFC_NUTRITION_LOOKUP_DEFAULT_DAILY_CAP_V13_ = 450/);
+          assert.match(gas,/450/);
           assert.match(gas,/Math\.min\(Math\.floor\(configured\), 500\)/);
-          assert.match(gas,/公式Webページ/);
-          assert.match(gas,/個人ブログ、まとめサイト/);
+          assert.match(gas,/普通のやつ/);
+          assert.match(gas,/現行ラインナップ/);
+          assert.match(gas,/終売/);
           assert.match(gas,/missing Google Search grounding metadata/);
-          assert.match(gas,/official domain not present in grounding sources/);
+          assert.doesNotMatch(gas,/official domain not present in grounding sources/);
           assert.doesNotMatch(gas,/apiKey\s*:\s*apiKey/);
-          console.log('GAS search proxy security/quota contract: OK');
+          console.log('GAS flexible search proxy security/quota contract: OK');
           NODE
 
       - name: Browser back still releases microphone
@@ -157,18 +181,23 @@ jobs:
           console.log('Browser-back mic release remains intact: OK');
           NODE
 
-      - name: Production wiring uses v1.7.20
+      - name: Production wiring uses v1.7.21
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.20/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.21/);
           assert.doesNotMatch(entry,/live-v1719\.js/);
+          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
+          assert.match(live,/config-v1720\.js\?v=1\.7\.21/);
+          assert.match(live,/transport-v1720\.js\?v=1\.7\.21/);
+          assert.match(live,/live-guard-v1720\.js\?v=1\.7\.21/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.21/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.20/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.20/);
+            assert.match(html,/v1\.7\.21/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.21/);
           }
-          console.log('v1.7.20 production wiring: OK');
+          console.log('v1.7.21 production wiring: OK');
           NODE
