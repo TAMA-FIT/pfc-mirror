@@ -1,0 +1,30 @@
+/* v1.7.15 — home readability polish. */
+
+/* Keep one visual language for P/F/C: letter, gauge and kcal contribution use the same hue. */
+.macro-p .macro-cal-pill{background:#edf8f2;border-color:#cfe8da;color:#188a4d}
+.macro-f .macro-cal-pill{background:#fff6e8;border-color:#efd2a7;color:#c96d00}
+.macro-c .macro-cal-pill{background:#eef6ff;border-color:#cddff3;color:#246fc0}
+
+/* Restore the larger pre-Live microphone treatment without changing the Live action itself. */
+.senior-talk-btn .live-icon,
+.senior-talk-btn .mic.live-icon{font-size:42px;line-height:1;width:48px;min-width:48px;text-align:center;display:inline-flex;align-items:center;justify-content:center}
+
+/* Today's log is grouped by meal while individual record cards keep their existing edit/delete controls. */
+.meal-record-group{margin:0 0 16px}
+.meal-record-group-head{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px 6px;border-top:1px solid #dce8e1}
+.meal-record-group:first-of-type .meal-record-group-head{border-top:0}
+.meal-record-group-title{display:flex;align-items:baseline;gap:8px}
+.meal-record-group-title strong{font-size:18px;color:#263a30}
+.meal-record-group-title span{font-size:12px;color:#718078;font-weight:800}
+.meal-record-group-kcal{display:flex;align-items:baseline;gap:4px;color:#187a51}
+.meal-record-group-kcal strong{font-size:19px}
+.meal-record-group-kcal small{font-size:11px;font-weight:800}
+.meal-record-group-macros{margin:0 12px 8px;color:#6a7a72;font-size:12px;font-weight:800;line-height:1.4}
+.meal-record-group-items{display:grid;gap:8px}
+.meal-record-group-items .record-card{margin-bottom:0}
+
+@media (max-width:420px){
+  .meal-record-group-head{padding-left:10px;padding-right:10px}
+  .meal-record-group-title strong{font-size:17px}
+  .meal-record-group-macros{margin-left:10px;margin-right:10px;font-size:11px}
+}
