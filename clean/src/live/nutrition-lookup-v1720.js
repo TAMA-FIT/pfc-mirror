@@ -1,6 +1,6 @@
 import { GAS_URL } from './config-v1720.js?v=1.7.21';
 
-export const NUTRITION_LOOKUP_VERSION='v1.7.22-diagnostics-safe';
+export const NUTRITION_LOOKUP_VERSION='v1.7.23-persistent-diagnostics';
 export const NUTRITION_LOOKUP_MODEL='gemini-2.5-flash';
 export const NUTRITION_LOOKUP_TIMEOUT_MS=12000;
 export const NUTRITION_LOOKUP_CACHE_TTL_MS=30*24*60*60*1000;
@@ -8,6 +8,7 @@ const CACHE_KEY='pfc-official-nutrition-cache-v1';
 const LOOKUP_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('lookupDebug')==='1';
 const LOOKUP_DIAG_MAX=12;
 const lookupDiagnostics=[];
+const lookupDiagnosticListeners=new Set();
 
 function text(v){return String(v??'').trim()}
 function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
@@ -39,30 +40,15 @@ function diagnosticSummary(body={}){
   if(body.sourceDomain)parts.push(`source=${sanitize(body.sourceDomain,100)}`);
   return parts.join(' | ')||'no diagnostic fields';
 }
-function renderLookupDiagnostics(){
-  if(!LOOKUP_DEBUG||typeof document==='undefined'||!lookupDiagnostics.length)return;
-  const memo=document.querySelector('#pfc-live-sheet .pfc-live-memo');
-  if(!memo)return;
-  let panel=document.getElementById('pfc-lookup-debug-safe');
-  if(!panel){
-    panel=document.createElement('div');
-    panel.id='pfc-lookup-debug-safe';
-    panel.className='pfc-live-diagnostic';
-    memo.insertAdjacentElement('afterend',panel);
+function diagnosticCopyRows(){
+  return lookupDiagnostics.map((r,i)=>`#${i+1} ${r.foodName} | ${r.stage} | ${Number.isFinite(r.elapsedMs)?`${(r.elapsedMs/1000).toFixed(1)}s`:'n/a'} | ${r.summary}${r.candidates?.length?` | candidates=${r.candidates.join(' / ')}`:''}`);
+}
+function emitLookupDiagnostics(){
+  if(!LOOKUP_DEBUG)return;
+  const snapshot=getLookupDiagnostics();
+  for(const listener of [...lookupDiagnosticListeners]){
+    try{listener(snapshot)}catch{}
   }
-  panel.innerHTML=`<strong>公式検索 診断（安全モード）</strong><div style="margin-top:6px;font-size:12px;line-height:1.45;word-break:break-word">${lookupDiagnostics.map((r,i)=>{
-    const elapsed=Number.isFinite(r.elapsedMs)?`${(r.elapsedMs/1000).toFixed(1)}秒`:'';
-    const candidates=r.candidates?.length?`<br>候補: ${r.candidates.map(x=>sanitize(x,80)).join(' / ')}`:'';
-    return `<div style="margin-top:7px"><b>#${i+1} ${sanitize(r.foodName,100)}</b><br>${sanitize(r.stage,60)}${elapsed?` / ${elapsed}`:''}<br>${sanitize(r.summary,700)}${candidates}</div>`;
-  }).join('')}</div><button type="button" data-copy-safe-lookup-diag style="margin-top:8px">診断をコピー</button>`;
-  const button=panel.querySelector('[data-copy-safe-lookup-diag]');
-  if(button)button.onclick=async()=>{
-    const out=[
-      `PFC lookup diagnostics ${NUTRITION_LOOKUP_VERSION}`,
-      ...lookupDiagnostics.map((r,i)=>`#${i+1} ${r.foodName} | ${r.stage} | ${Number.isFinite(r.elapsedMs)?`${(r.elapsedMs/1000).toFixed(1)}s`:'n/a'} | ${r.summary}${r.candidates?.length?` | candidates=${r.candidates.join(' / ')}`:''}`)
-    ].join('\n');
-    try{await navigator.clipboard.writeText(out);button.textContent='コピーしました'}catch{button.textContent='コピー失敗'}
-  };
 }
 function addLookupDiagnostic({foodName='',candidateNames=[],stage='',elapsedMs=null,body=null,summary=''}={}){
   if(!LOOKUP_DEBUG)return;
@@ -74,8 +60,24 @@ function addLookupDiagnostic({foodName='',candidateNames=[],stage='',elapsedMs=n
     summary:sanitize(summary||diagnosticSummary(body||{}),700)
   });
   if(lookupDiagnostics.length>LOOKUP_DIAG_MAX)lookupDiagnostics.splice(0,lookupDiagnostics.length-LOOKUP_DIAG_MAX);
-  queueMicrotask(renderLookupDiagnostics);
+  emitLookupDiagnostics();
 }
+
+export function isLookupDebugEnabled(){return LOOKUP_DEBUG}
+export function getLookupDiagnostics(){return lookupDiagnostics.map(r=>({...r,candidates:[...(r.candidates||[])]}))}
+export function formatLookupDiagnosticsText(){
+  return [`PFC lookup diagnostics ${NUTRITION_LOOKUP_VERSION}`,...diagnosticCopyRows()].join('\n');
+}
+export function clearLookupDiagnostics(){
+  lookupDiagnostics.length=0;
+  emitLookupDiagnostics();
+}
+export function setLookupDiagnosticListener(listener){
+  if(typeof listener!=='function')return ()=>{};
+  lookupDiagnosticListeners.add(listener);
+  return ()=>lookupDiagnosticListeners.delete(listener);
+}
+
 export function nutritionLookupCacheKey({foodName='',contextText='',candidateNames=[]}={}){
   const candidates=(Array.isArray(candidateNames)?candidateNames:[]).map(normalizeKeyPart).filter(Boolean).join(' / ');
   return `${normalizeKeyPart(foodName)}|${normalizeKeyPart(contextText)}|${candidates}`;

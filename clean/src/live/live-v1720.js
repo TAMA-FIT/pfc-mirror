@@ -8,10 +8,11 @@ import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=
 import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.12';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
 import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.21';
-import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL } from './nutrition-lookup-v1720.js?v=1.7.21';
+import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL, isLookupDebugEnabled, getLookupDiagnostics, formatLookupDiagnosticsText, clearLookupDiagnostics, setLookupDiagnosticListener } from './nutrition-lookup-v1720.js?v=1.7.23';
 
 const draft=new LiveMealDraft();
 const LIVE_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('liveDebug')==='1';
+const LOOKUP_DEBUG=isLookupDebugEnabled();
 const TRANSCRIBER_START_DELAY_MS=120;
 const LIVE_MUTE_STORAGE_KEY='pfc-live-ai-muted-v1';
 const TURN_RECOVERY_DELAY_MS=180;
@@ -49,7 +50,7 @@ let pendingExplicitEnd=false;
 let cleanupInFlight=null;
 const lookupStates=new Map();
 
-function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot',"'":'&#39;'}[m]))}
 function n1(v){const n=Number(v);return Number.isFinite(n)?String(Math.round(n*10)/10):''}
 function readAiMuted(){try{return localStorage.getItem(LIVE_MUTE_STORAGE_KEY)==='1'}catch{return false}}
 function writeAiMuted(value){try{localStorage.setItem(LIVE_MUTE_STORAGE_KEY,value?'1':'0')}catch{}}
@@ -135,6 +136,16 @@ function itemNutritionLine(item){
     return `${Math.round(Number(r.Cal)||0)} kcal ・ P ${n1(r.P)}g / F ${n1(r.F)}g / C ${n1(r.C)}g`;
   }catch{return ''}
 }
+function lookupDiagnosticPanelHtml(){
+  if(!LOOKUP_DEBUG)return '';
+  const rows=getLookupDiagnostics();
+  const body=rows.length?rows.map((r,i)=>{
+    const elapsed=Number.isFinite(r.elapsedMs)?`${(r.elapsedMs/1000).toFixed(1)}秒`:'n/a';
+    const candidates=r.candidates?.length?`<br><span>候補: ${esc(r.candidates.join(' / '))}</span>`:'';
+    return `<div style="margin-top:8px"><b>#${i+1} ${esc(r.foodName)}</b><br><span>${esc(r.stage)} / ${esc(elapsed)}</span><br><span>${esc(r.summary)}</span>${candidates}</div>`;
+  }).join(''):'<div style="margin-top:6px"><span>診断モード有効。公式検索の開始を待っています。</span></div>';
+  return `<div class="pfc-live-diagnostic" data-lookup-diagnostic-panel><strong>公式検索 診断（安全モード）</strong>${body}<button type="button" data-live-action="copy-lookup-diag" style="margin-top:8px">診断をコピー</button></div>`;
+}
 function render(){
   ensureModal();const sheet=document.getElementById('pfc-live-sheet');if(!sheet)return;
   const items=draft.snapshot();const ready=draft.isReady();
@@ -169,6 +180,7 @@ function render(){
             <div class="sv4-food-qty">${esc(itemQty(x))}<button class="memo-remove" data-live-action="remove" data-ref="${esc(x.ref)}" aria-label="削除">×</button></div>
           </div>`}).join(''):'<div class="sv4-empty">会話から食品をここへ追加します。</div>'}
       </div>
+      ${lookupDiagnosticPanelHtml()}
       ${registeredCount?`<div class="pfc-live-saved">このセッションで ${registeredCount}件 登録済み</div>`:''}
     </div>
     <div class="sv4-actions pfc-live-actions">
@@ -310,6 +322,7 @@ async function endLive(){
 }
 async function startLive(){
   if(transport)return;
+  clearLookupDiagnostics();
   errorText='';diagnosticText=`app ${LIVE_VERSION}`;transcribeDiagnosticText='専用文字起こしを準備しています…';registeredCount=0;lastUser='';lastModel='';transcriptSpeaker='none';draft.clear();lookupStates.clear();
   traceStartMs=performance.now();traceEvents=[];lastAudioArrivalMs=0;audioBurstCount=0;audioChunkCount=0;transcriberReady=false;transcriberConnected=false;captureStarted=false;diagnosticReplayActive=false;userTurnId=0;resetTurnGuard();
   armLiveHistory();ensureModal().hidden=false;sessionState='token';render();
@@ -361,6 +374,7 @@ async function replayChunkedPcm(){
   try{const info=await audio.replayLastTurnChunked();addTrace(`pcm-chunked-replay end ${info?.durationSec?.toFixed?.(1)||'?'}s`)}catch(e){addTrace(`pcm-chunked-replay error ${String(e?.message||e)}`)}finally{diagnosticReplayActive=false;render()}
 }
 
+setLookupDiagnosticListener(()=>{if(LOOKUP_DEBUG&&modal&&!modal.hidden)render()});
 document.addEventListener('click',e=>{
   const button=e.target.closest('[data-live-action]');if(!button)return;const action=button.dataset.liveAction;
   if(action==='start'){e.preventDefault();startLive()}
@@ -369,6 +383,7 @@ document.addEventListener('click',e=>{
   else if(action==='toggle-mute'){e.preventDefault();setAiMuted(!aiMuted)}
   else if(action==='replay-pcm'){e.preventDefault();replayRawPcm()}
   else if(action==='replay-pcm-chunked'){e.preventDefault();replayChunkedPcm()}
+  else if(action==='copy-lookup-diag'){e.preventDefault();navigator.clipboard?.writeText?.(formatLookupDiagnosticsText()).then(()=>{button.textContent='コピーしました'}).catch(()=>{button.textContent='コピー失敗'})}
   else if(action==='remove'){e.preventDefault();const ref=button.dataset.ref;draft.removeLocal(ref);lookupStates.delete(ref);render()}
 });
 addEventListener('popstate',async()=>{if(!liveHistoryArmed&&!pendingExplicitEnd)return;liveHistoryArmed=false;pendingExplicitEnd=false;await cleanupLiveSession();location.reload()});
@@ -383,4 +398,4 @@ loadCss();ensureModal();warmLiveRuntime();
 const observer=new MutationObserver(queuePatch);
 for(const id of ['view-home','view-settings']){const el=document.getElementById(id);if(el)observer.observe(el,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']})}
 queuePatch();
-console.info('[PFC Gemini Live]',{version:LIVE_VERSION,transcriber:TRANSCRIBE_MODEL,audioBufferMs:LIVE_AUDIO_TARGET_BUFFER_SEC*1000,officialLookupModel:NUTRITION_LOOKUP_MODEL,turnGuard:true});
+console.info('[PFC Gemini Live]',{version:LIVE_VERSION,transcriber:TRANSCRIBE_MODEL,audioBufferMs:LIVE_AUDIO_TARGET_BUFFER_SEC*1000,officialLookupModel:NUTRITION_LOOKUP_MODEL,turnGuard:true,lookupDebug:LOOKUP_DEBUG});
