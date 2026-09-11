@@ -1,4 +1,4 @@
-export const NUTRITION_EVIDENCE_TYPES = Object.freeze(['user-label','official-web','ai-estimate']);
+export const NUTRITION_EVIDENCE_TYPES = Object.freeze(['user-label','official-web','trusted-fallback','ai-estimate']);
 
 function num(v){const n=Number(v);return Number.isFinite(n)?n:0}
 function round1(v){return Math.round(num(v)*10)/10}
@@ -33,10 +33,12 @@ export function chooseNutritionMode(item={}) {
   const ev=item.nutritionEvidence||null;
   if(ev?.sourceType==='user-label')return {mode:'evidence',evidence:ev};
   if(ev?.sourceType==='official-web')return {mode:'evidence',evidence:ev};
+  if(ev?.sourceType==='trusted-fallback')return {mode:'evidence',evidence:ev};
   if(item.foodId){
     if(!item.unresolved&&!item.needsSkin&&!item.needsAmount&&Number(item.amount)>0)return {mode:'trusted-db',evidence:null};
     return {mode:'pending',evidence:null};
   }
+  if(ev?.sourceType==='ai-estimate'&&item.brandProduct)return {mode:'pending',evidence:null};
   if(ev?.sourceType==='ai-estimate')return {mode:'evidence',evidence:ev};
   return {mode:'pending',evidence:null};
 }
@@ -44,6 +46,7 @@ export function chooseNutritionMode(item={}) {
 export function evidenceSourceText(evidence={}) {
   if(evidence.sourceType==='user-label')return 'パッケージ・表示値';
   if(evidence.sourceType==='official-web')return evidence.sourceLabel||'公式情報';
+  if(evidence.sourceType==='trusted-fallback')return evidence.sourceLabel||'標準食品データ代替';
   if(evidence.sourceType==='ai-estimate')return 'AI推定・目安';
   return '';
 }
@@ -51,7 +54,7 @@ export function evidenceSourceText(evidence={}) {
 export function buildEvidenceRecord(item, id=Date.now()) {
   const {mode,evidence}=chooseNutritionMode(item);
   if(mode!=='evidence'||!evidence)return null;
-  const name=String(item.canonicalName||item.name||'食品').trim()||'食品';
+  const name=String(item.displayName||item.canonicalName||item.name||'食品').trim()||'食品';
   const serving=String(evidence.servingLabel||'1食').trim()||'1食';
   const meal=['朝','昼','晩','間食'].includes(item.meal)?item.meal:'間食';
   return {
@@ -67,7 +70,10 @@ export function buildEvidenceRecord(item, id=Date.now()) {
       sourceUrl:evidence.sourceUrl||'',
       servingLabel:serving,
       kcalDerived:!!evidence.kcalDerived,
-      externalNutrition:true
+      externalNutrition:true,
+      ...(item.genericFallback?.genericName?{fallbackFoodName:item.genericFallback.genericName}:{}),
+      ...(item.genericFallback?.originalName?{fallbackOriginalName:item.genericFallback.originalName}:{}),
+      ...(item.genericFallback?.sourceKind?{fallbackSourceKind:item.genericFallback.sourceKind}:{})
     }
   };
 }

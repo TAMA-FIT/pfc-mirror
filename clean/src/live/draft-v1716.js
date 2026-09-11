@@ -1,6 +1,7 @@
 import { resolveFood, searchFoods, defaultAmount } from '../nutrition/catalog.js';
 import { autoMeal } from '../storage.js';
-import { normalizeNutritionEvidence, chooseNutritionMode } from '../nutrition/evidence-v1716.js?v=1.7.24';
+import { normalizeNutritionEvidence, chooseNutritionMode } from '../nutrition/evidence-v1716.js?v=1.7.27';
+import { buildTrustedGenericFallback, isLikelyBrandProduct } from './generic-fallback-v1727.js';
 
 const FORBIDDEN = new Set([
   'P','F','C','A','a','cal','Cal','foodId','food_id',
@@ -105,6 +106,30 @@ function validateArgs(raw) {
   });
 }
 
+function genericFallbackFor(name){
+  const hit=buildTrustedGenericFallback(name);
+  if(!hit)return null;
+  return {
+    nutritionEvidence:normalizeNutritionEvidence(hit.evidence),
+    genericFallback:{
+      originalName:hit.originalName,
+      brandlessName:hit.brandlessName,
+      genericName:hit.genericName,
+      foodId:hit.foodId,
+      sourceKind:hit.sourceKind,
+      sourceLabel:hit.sourceLabel
+    },
+    displayName:hit.originalName
+  };
+}
+
+function replaceBrandedAiEstimate(name,evidence){
+  if(evidence?.sourceType!=='ai-estimate'||!isLikelyBrandProduct(name))return null;
+  const fallback=genericFallbackFor(name);
+  if(!fallback)throw new Error('AI estimate is blocked for branded products; official data or a trusted generic Food Master fallback is required');
+  return fallback;
+}
+
 let refSeq = 0;
 function nextRef() {
   refSeq += 1;
@@ -123,7 +148,10 @@ function resolveItem(item) {
     assumed: false,
     candidateNames: [],
     standardLabel:'',
-    nutritionEvidence:existingEvidence
+    nutritionEvidence:existingEvidence,
+    brandProduct:isLikelyBrandProduct(item?.name),
+    genericFallback:item?.genericFallback?clone(item.genericFallback):null,
+    displayName:text(item?.displayName)
   };
 
   let query = text(base.name);
@@ -157,6 +185,8 @@ function resolveItem(item) {
   base.foodId = food.id;
   base.canonicalName = food.name;
   base.standardLabel = standardDisplayForFood(food);
+  base.genericFallback=null;
+  base.displayName='';
 
   if (base.amount == null) {
     if (food.criticalAmount) {
@@ -178,16 +208,19 @@ function publicItem(item) {
     ref:item.ref,
     name:item.name,
     canonicalName:item.canonicalName,
+    displayName:item.displayName||'',
     amount:item.amount,
     unit:item.unit,
     meal:item.meal,
     variant:item.variant,
-    status:item.needsSkin?'needs-skin':item.unresolved?'unresolved':item.needsAmount?'needs-amount':'ready',
+    status:item.genericFallback?'ready':item.needsSkin?'needs-skin':item.unresolved?'unresolved':item.needsAmount?'needs-amount':'ready',
     needsSkin:!!item.needsSkin,
     needsAmount:!!item.needsAmount,
     assumed:!!item.assumed,
+    brandProduct:!!item.brandProduct,
     standardLabel:item.standardLabel||'',
     nutritionMode:chooseNutritionMode(item).mode,
+    ...(item.genericFallback ? {genericFallback:clone(item.genericFallback)} : {}),
     ...(item.nutritionEvidence ? {nutritionEvidence:clone(item.nutritionEvidence)} : {}),
     ...(item.candidateNames?.length ? {candidateNames:[...item.candidateNames]} : {})
   };
@@ -212,6 +245,7 @@ export class LiveMealDraft {
 
     for (const op of operations) {
       if (op.op === 'add') {
+        const substituted=replaceBrandedAiEstimate(op.name,op.nutritionEvidence);
         this.items.push(resolveItem({
           ref: nextRef(),
           name: text(op.name),
@@ -219,7 +253,9 @@ export class LiveMealDraft {
           unit: text(op.unit),
           meal: op.meal || autoMeal(),
           variant: normalizeChickenVariant(op.variant),
-          nutritionEvidence:op.nutritionEvidence||null
+          nutritionEvidence:substituted?.nutritionEvidence||op.nutritionEvidence||null,
+          genericFallback:substituted?.genericFallback||null,
+          displayName:substituted?.displayName||''
         }));
         continue;
       }
@@ -237,14 +273,31 @@ export class LiveMealDraft {
         const newName=text(op.name);
         if (!newName) throw new Error('updated name must not be empty');
         if (newName !== current.name && !own(op,'variant')) next.variant='';
-        if (newName !== current.name) next.nutritionEvidence=null;
+        if (newName !== current.name) {
+          next.nutritionEvidence=null;
+          next.genericFallback=null;
+          next.displayName='';
+        }
         next.name=newName;
       }
       if (own(op,'amount')) next.amount=op.amount;
       if (own(op,'unit')) next.unit=op.unit;
       if (own(op,'meal')) next.meal=op.meal;
       if (own(op,'variant')) next.variant=normalizeChickenVariant(op.variant);
-      if (op.nutritionEvidence) next.nutritionEvidence=op.nutritionEvidence;
+      if (op.nutritionEvidence) {
+        const substituted=replaceBrandedAiEstimate(next.name,op.nutritionEvidence);
+        if(substituted){
+          next.nutritionEvidence=substituted.nutritionEvidence;
+          next.genericFallback=substituted.genericFallback;
+          next.displayName=substituted.displayName;
+          next.amount=null;
+          next.unit='';
+        }else{
+          next.nutritionEvidence=op.nutritionEvidence;
+          next.genericFallback=null;
+          next.displayName='';
+        }
+      }
       this.items[index]=resolveItem(next);
     }
 
