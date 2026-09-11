@@ -20,22 +20,37 @@ jobs:
           node-version: '22'
       - name: Syntax check
         run: node --check clean/src/live/free-tier-search-hotfix-v1717.js
-      - name: Strip paid Search Grounding from Live setup
+      - name: Free-tier unresolved fallback contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {HOTFIX_VERSION,sanitizeLiveSetupPayload} from './clean/src/live/free-tier-search-hotfix-v1717.js';
-          assert.equal(HOTFIX_VERSION,'v1.7.17');
+          import {HOTFIX_VERSION,sanitizeLiveSetupPayload,augmentToolResponsePayload} from './clean/src/live/free-tier-search-hotfix-v1717.js';
+          assert.equal(HOTFIX_VERSION,'v1.7.18');
           const payload={setup:{
             tools:[{googleSearch:{}},{functionDeclarations:[{name:'update_meal_draft'}]}],
-            systemInstruction:{parts:[{text:'質問・Google検索・音声返答より先に update_meal_draft。unresolvedならGoogle Searchを使う。'}]}
+            systemInstruction:{parts:[{text:[
+              '質問・Google検索・音声返答より先に update_meal_draft。',
+              'update_meal_draft の結果が unresolved の食品だけ、Google Searchを使って公式メーカー・公式チェーン・公式商品ページの栄養情報を探してください。',
+              '公式の正確な商品栄養情報を確認できた場合だけ nutritionSource="official-web" としてください。',
+              'Food Masterで未解決かつ公式情報も確認できない場合は、最後の手段として推定できます。'
+            ].join('\n')}]}
           }};
           const out=sanitizeLiveSetupPayload(structuredClone(payload));
           assert.equal(out.setup.tools.length,1);
           assert.equal(out.setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
           assert.equal(JSON.stringify(out.setup.tools).includes('googleSearch'),false);
-          assert.match(out.setup.systemInstruction.parts[0].text,/現在の無料運用ではGoogle Searchツールを使用しません/);
-          assert.match(out.setup.systemInstruction.parts[0].text,/official-webは送信しないでください/);
-          assert.doesNotMatch(out.setup.systemInstruction.parts[0].text,/質問・Google検索・音声返答/);
-          console.log('Free-tier Live setup hotfix: OK');
+          const instruction=out.setup.systemInstruction.parts[0].text;
+          assert.match(instruction,/同じターン内に必ず p\/f\/c/);
+          assert.match(instruction,/内部知識/);
+          assert.match(instruction,/ready=false の間は「登録ボタンを押してください」と案内してはいけません/);
+          assert.doesNotMatch(instruction,/unresolved の食品だけ、Google Searchを使って/);
+          assert.doesNotMatch(instruction,/公式の正確な商品栄養情報を確認できた場合だけ/);
+
+          const tool={toolResponse:{functionResponses:[{response:{result:{ready:false,draft:[{ref:'meal-1',status:'unresolved',candidateNames:[]}]}}}]}};
+          const augmented=augmentToolResponsePayload(structuredClone(tool));
+          const result=augmented.toolResponse.functionResponses[0].response.result;
+          assert.deepEqual(result.unresolvedRefs,['meal-1']);
+          assert.match(result.freeTierNextAction,/ai-estimate/);
+          assert.match(result.freeTierNextAction,/音声返答より先に実行/);
+          console.log('Free-tier mandatory AI estimate fallback: OK');
           NODE
