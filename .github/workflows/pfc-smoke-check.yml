@@ -59,7 +59,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.11');
+          assert.equal(LIVE_VERSION, 'v1.7.12');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
@@ -227,13 +227,18 @@ jobs:
           assert.match(transcribe, /languageCodes: \[TRANSCRIBE_LANGUAGE\]/);
           assert.match(transcribe, /mode: TRANSCRIBE_MODE/);
           assert.match(live, /GeminiLiveTranscriber/);
+          assert.match(live, /LIVE_DEBUG/);
+          assert.match(live, /connectTranscriberInBackground/);
+          assert.match(live, /Promise\.all\(\[audioReady,liveReady\]\)/);
+          assert.match(live, /if\(transcriberReady\)transcriber\?\.sendAudio\(bytes\)/);
+          assert.match(live, /warmLiveRuntime/);
           assert.match(live, /transport\?\.sendAudio\(bytes\)/);
           assert.match(live, /transcriber\?\.sendAudio\(bytes\)/);
           assert.match(live, /if\(!transcriberReady\)acceptInputTranscript\(t\)/);
           assert.match(live, /audio\?\.completeModelTurn/);
           assert.match(live, /data-live-action="replay-pcm"/);
           assert.match(live, /data-live-action="replay-pcm-chunked"/);
-          assert.match(live, /audio-v170\.js\?v=1\.7\.11/);
+          assert.match(live, /audio-v170\.js\?v=1\.7\.12/);
           assert.match(audio, /replayLastTurnRaw/);
           assert.match(audio, /replayLastTurnChunked/);
           assert.match(audio, /live-playback-worklet-v1711\.js\?v=1\.7\.11/);
