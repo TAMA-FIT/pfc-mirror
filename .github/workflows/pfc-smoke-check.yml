@@ -57,16 +57,20 @@ jobs:
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
+          import { LIVE_MODEL, LIVE_VERSION, SYSTEM_INSTRUCTION, buildSetupMessage, buildOpeningMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.13');
+          assert.equal(LIVE_VERSION, 'v1.7.14');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
           assert.deepEqual(message.setup.generationConfig.responseModalities, ['AUDIO']);
           assert.equal(message.setup.tools[0].functionDeclarations[0].name, 'update_meal_draft');
-          assert.equal(message.setup.realtimeInputConfig.automaticActivityDetection.silenceDurationMs, 900);
-          console.log('Gemini Live setup contract: OK');
+          assert.equal(message.setup.realtimeInputConfig.automaticActivityDetection.silenceDurationMs, 1400);
+          assert.match(SYSTEM_INSTRUCTION, /質問や音声返答より先に update_meal_draft/);
+          assert.match(SYSTEM_INSTRUCTION, /何時に食べましたか/);
+          assert.match(SYSTEM_INSTRUCTION, /画面の内容で合っていれば登録ボタンを押してください/);
+          assert.match(buildOpeningMessage().realtimeInput.text, /現在時刻によるアプリの自動補完/);
+          console.log('Gemini Live v1.7.14 conversation UX contract: OK');
           NODE
       - name: Dedicated Live Transcribe contract
         run: |
@@ -224,6 +228,7 @@ jobs:
           assert.match(transport, /data instanceof Blob/);
           assert.match(transport, /data instanceof ArrayBuffer/);
           assert.match(transport, /onTrace/);
+          assert.match(transport, /config-v170\.js\?v=1\.7\.14/);
           assert.match(transcribe, /gemini-3\.5-transcribe-live/);
           assert.match(transcribe, /languageCodes: \[TRANSCRIBE_LANGUAGE\]/);
           assert.match(transcribe, /mode: TRANSCRIBE_MODE/);
@@ -239,7 +244,9 @@ jobs:
           assert.match(live, /talk\.removeAttribute\('data-action'\)/);
           assert.match(live, /talk\.dataset\.liveAction='start'/);
           assert.doesNotMatch(live, /insertAdjacentHTML\('afterend'/);
-          assert.match(live, /live-v170\.css\?v=1\.7\.13/);
+          assert.match(live, /config-v170\.js\?v=1\.7\.14/);
+          assert.match(live, /transport-v170\.js\?v=1\.7\.14/);
+          assert.match(live, /live-v170\.css\?v=1\.7\.14/);
           assert.match(main, /class=\"senior-talk-btn senior-live-btn\" data-live-action=\"start\"/);
           assert.doesNotMatch(main, /class=\"senior-talk-btn\" data-action=\"voice\"/);
           assert.match(live, /transport\?\.sendAudio\(bytes\)/);
@@ -255,5 +262,5 @@ jobs:
           assert.match(audio, /AudioWorkletNode/);
           assert.match(audio, /concatInt16/);
           assert.match(audio, /diagnosticReplayActive/);
-          console.log('Live diagnostics, PCM replay, dual-stream, and GAS fetch contract: OK');
+          console.log('Live diagnostics, PCM replay, dual-stream, GAS fetch, and v1.7.14 UX contract: OK');
           NODE
