@@ -1,4 +1,4 @@
-export const LIVE_VERSION = 'v1.7.10';
+export const LIVE_VERSION = 'v1.7.11';
 export const LIVE_MODEL = 'gemini-3.1-flash-live-preview';
 export const GAS_URL = 'https://script.google.com/macros/s/AKfycbxRNfeijUEwXwoFgBYbS60S5zn2fcuqHSm4TAbRePUzjTjqInXu10ZmK4cUvxoJ-dCAxw/exec';
 

@@ -57,6 +57,7 @@ function concatInt16(chunks){
 export const LIVE_AUDIO_TARGET_BUFFER_SEC=0.30;
 export const LIVE_AUDIO_REBUFFER_THRESHOLD_SEC=0.06;
 export const LIVE_AUDIO_START_DELAY_SEC=0.02;
+export const LIVE_AUDIO_WORKLET_NAME='pfc-live-pcm-player';
 
 export function shouldStartBufferedPlayback(pendingDuration,target=LIVE_AUDIO_TARGET_BUFFER_SEC){
   return Number(pendingDuration)>=Number(target);
@@ -71,9 +72,11 @@ export function shouldRebuffer(now,playAt,threshold=LIVE_AUDIO_REBUFFER_THRESHOL
 export class LiveAudioIO{
   constructor(){
     this.ctx=null;this.stream=null;this.source=null;this.processor=null;this.silentGain=null;
-    this.onPcm=null;this.outputNodes=new Set();this.playAt=0;
+    this.onPcm=null;this.onPlaybackEvent=null;this.outputNodes=new Set();this.playAt=0;
     this.pending=[];this.pendingDuration=0;this.playbackActive=false;
     this.rawCurrent=[];this.lastRawTurn=null;this.diagnosticReplayActive=false;
+    this.workletNode=null;this.workletAttempted=false;this.workletError='';this.playbackMode='initializing';
+    this.workletDrainWaiters=[];
   }
 
   async prepare(){
@@ -82,10 +85,90 @@ export class LiveAudioIO{
     if(!navigator.mediaDevices?.getUserMedia)throw new Error('このブラウザではマイクを利用できません');
     if(!this.ctx)this.ctx=new Ctx({latencyHint:'interactive'});
     if(this.ctx.state==='suspended')await this.ctx.resume();
+    await this._preparePlaybackEngine();
     if(!this.stream){
       this.stream=await navigator.mediaDevices.getUserMedia({audio:{channelCount:1,echoCancellation:true,noiseSuppression:true,autoGainControl:true}});
     }
   }
+
+  async _preparePlaybackEngine(){
+    if(this.workletNode||this.workletAttempted)return;
+    this.workletAttempted=true;
+    if(!this.ctx?.audioWorklet||typeof AudioWorkletNode==='undefined'){
+      this.playbackMode='buffer-source-fallback';
+      this.workletError='AudioWorklet unavailable';
+      return;
+    }
+    try{
+      const moduleUrl=new URL('./live-playback-worklet-v1711.js?v=1.7.11',import.meta.url);
+      await this.ctx.audioWorklet.addModule(moduleUrl.href);
+      const node=new AudioWorkletNode(this.ctx,LIVE_AUDIO_WORKLET_NAME,{
+        numberOfInputs:0,
+        numberOfOutputs:1,
+        outputChannelCount:[1],
+        processorOptions:{targetBufferSec:LIVE_AUDIO_TARGET_BUFFER_SEC}
+      });
+      node.port.onmessage=e=>this._handleWorkletMessage(e.data||{});
+      node.connect(this.ctx.destination);
+      this.workletNode=node;
+      this.playbackMode='audio-worklet-continuous';
+    }catch(e){
+      this.workletNode=null;
+      this.playbackMode='buffer-source-fallback';
+      this.workletError=String(e?.message||e);
+    }
+  }
+
+  _handleWorkletMessage(message){
+    const type=String(message.type||'');
+    if(type==='drain')this._resolveWorkletDrainWaiters();
+    if(type==='underflow'||type==='rate-reset'){
+      try{this.onPlaybackEvent?.(message)}catch{}
+    }
+  }
+
+  _resolveWorkletDrainWaiters(){
+    const waiters=this.workletDrainWaiters.splice(0);
+    for(const waiter of waiters){
+      clearTimeout(waiter.timer);
+      try{waiter.resolve()}catch{}
+    }
+  }
+
+  _waitForWorkletDrain(timeoutMs=10000){
+    return new Promise(resolve=>{
+      const waiter={resolve,timer:null};
+      waiter.timer=setTimeout(()=>{
+        const index=this.workletDrainWaiters.indexOf(waiter);
+        if(index>=0)this.workletDrainWaiters.splice(index,1);
+        resolve();
+      },Math.max(500,timeoutMs));
+      this.workletDrainWaiters.push(waiter);
+    });
+  }
+
+  _enqueueWorkletPcm(pcm,rate){
+    if(!this.workletNode||!pcm?.length)return false;
+    const samples=int16ToFloat32(pcm);
+    this.workletNode.port.postMessage({type:'push',rate,samples});
+    return true;
+  }
+
+  _flushWorklet(){
+    if(!this.workletNode)return false;
+    this.workletNode.port.postMessage({type:'flush'});
+    return true;
+  }
+
+  _resetWorklet(){
+    if(this.workletNode){
+      try{this.workletNode.port.postMessage({type:'reset'})}catch{}
+    }
+    this._resolveWorkletDrainWaiters();
+  }
+
+  getPlaybackMode(){return this.playbackMode}
+  getPlaybackError(){return this.workletError}
 
   async startCapture(onPcm){
     await this.prepare();
@@ -160,11 +243,15 @@ export class LiveAudioIO{
     if(!this.ctx||!base64)return;
     const pcm=base64ToInt16(base64);
     if(!pcm.length)return;
-    this._queuePcmChunk(pcm,mimeRate(mimeType),{captureRaw:true});
+    const rate=mimeRate(mimeType);
+    this.rawCurrent.push({pcm:new Int16Array(pcm),rate});
+    if(this._enqueueWorkletPcm(pcm,rate))return;
+    this._queuePcmChunk(pcm,rate,{captureRaw:false});
   }
 
   completeModelTurn(){
-    this._startBufferedPlayback(true);
+    if(this.workletNode)this._flushWorklet();
+    else this._startBufferedPlayback(true);
     if(!this.rawCurrent.length)return this.getLastTurnRawInfo();
     const segments=this.rawCurrent;
     this.rawCurrent=[];
@@ -235,12 +322,20 @@ export class LiveAudioIO{
     this._stopOutput({clearPending:true,discardCapture:false});
     this.diagnosticReplayActive=true;
     try{
-      const segments=this.lastRawTurn.segments.map(x=>({pcm:new Int16Array(x.pcm),rate:x.rate}));
-      for(const segment of segments)this._queuePcmChunk(segment.pcm,segment.rate,{captureRaw:false});
-      this._startBufferedPlayback(true);
-      const endAt=this.playAt;
-      const waitMs=Math.max(0,(endAt-this.ctx.currentTime)*1000)+80;
-      await new Promise(resolve=>setTimeout(resolve,waitMs));
+      const turn=this.lastRawTurn;
+      const segments=turn.segments.map(x=>({pcm:new Int16Array(x.pcm),rate:x.rate}));
+      if(this.workletNode){
+        const drained=this._waitForWorkletDrain((turn.durationSec+2)*1000);
+        for(const segment of segments)this._enqueueWorkletPcm(segment.pcm,segment.rate);
+        this._flushWorklet();
+        await drained;
+      }else{
+        for(const segment of segments)this._queuePcmChunk(segment.pcm,segment.rate,{captureRaw:false});
+        this._startBufferedPlayback(true);
+        const endAt=this.playAt;
+        const waitMs=Math.max(0,(endAt-this.ctx.currentTime)*1000)+80;
+        await new Promise(resolve=>setTimeout(resolve,waitMs));
+      }
       return this.getLastTurnRawInfo();
     }finally{
       this.diagnosticReplayActive=false;
@@ -250,6 +345,7 @@ export class LiveAudioIO{
   _stopOutput({clearPending=true,discardCapture=true}={}){
     for(const node of this.outputNodes){try{node.stop()}catch{}}
     this.outputNodes.clear();
+    this._resetWorklet();
     if(clearPending){this.pending=[];this.pendingDuration=0}
     if(discardCapture)this.rawCurrent=[];
     this.playAt=this.ctx?.currentTime||0;
@@ -273,6 +369,9 @@ export class LiveAudioIO{
     this._stopOutput({clearPending:true,discardCapture:true});
     this.stopCapture();
     this.lastRawTurn=null;
+    try{this.workletNode?.disconnect()}catch{}
+    if(this.workletNode)this.workletNode.port.onmessage=null;
+    this.workletNode=null;
     const ctx=this.ctx;
     this.ctx=null;
     try{await ctx?.close()}catch{}

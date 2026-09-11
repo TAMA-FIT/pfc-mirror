@@ -8,10 +8,10 @@ Fresh GitHub `main` is always canonical for code/version state. This file record
 
 ## Current runtime / candidate
 
-- Production app before this candidate: **v1.7.9**
-- Production `main` before the v1.7.10 branch: `2264793cd3668fb1abe2619b34bd2f35d101351d`
-- Current candidate branch: `fix/v180-realtime-replay-diagnostic`
-- Intended next public version: **v1.7.10**
+- Production app before this candidate: **v1.7.10**
+- Production `main` before the v1.7.11 branch: `e6b3dc7cedb12e7a397ad015274b9b62bc2777cc`
+- Current candidate branch: `fix/v1711-audio-worklet-stream`
+- Intended next public version: **v1.7.11**
 - Public URL: `https://tama-fit.github.io/pfc-mirror/`
 - Root `index.html` is an active runtime entrypoint and must be updated together with `clean/index.html` when version/cache markers change.
 
@@ -201,3 +201,36 @@ v1.7.10 adds a second diagnostic replay using the exact saved PCM chunk sequence
 4. Press `PCM診断②：同じchunksを再生経路で再生`.
 5. If ② buzzes while ① is clean, the Web Audio chunk scheduling/boundary path is implicated.
 6. If both ① and ② are clean while normal Live playback buzzes, real network arrival timing / underrun-rebuffer behavior is implicated.
+
+## v1.7.10 real-device result
+
+Android Chrome verification on 2026-09-11 produced the decisive result:
+
+- Normal real-time Live playback: **buzzer reproduced**.
+- Diagnostic ① one-piece raw PCM replay: **clean**.
+- Diagnostic ② exact same saved PCM chunks replayed locally through the old 300 ms BufferSource scheduler: **buzzer reproduced**.
+
+Because diagnostic ② has no WebSocket/network arrival timing, network jitter is not required to reproduce the artifact. The common factor between normal Live and diagnostic ② is the chunk-by-chunk `AudioBufferSourceNode` scheduling path. The one-piece PCM buffer remaining clean strongly implicates node/chunk boundary scheduling rather than the model PCM content itself.
+
+## v1.7.11 continuous AudioWorklet playback candidate
+
+v1.7.11 replaces normal Gemini model-audio output on supported browsers with one persistent `AudioWorkletNode`:
+
+- incoming 24 kHz PCM chunks are queued into one persistent processor instead of creating one `AudioBufferSourceNode` per chunk
+- the processor keeps the existing ~300 ms startup/rebuffer target
+- linear resampling is continuous across chunk boundaries inside the processor
+- a short fade-in is applied on start/rebuffer
+- `turnComplete` flushes any final audio below the 300 ms target
+- interruption resets the persistent queue immediately
+- unsupported browsers retain the old BufferSource path only as an explicit fallback
+- diagnostic ① remains the one-piece PCM baseline
+- diagnostic ② now feeds the same saved chunks through the new AudioWorklet engine
+
+Immediate device verification for v1.7.11:
+
+1. Confirm visible `v1.7.11`.
+2. Confirm `再生エンジン` shows `AudioWorklet 連続ストリーム`.
+3. Listen to a normal Live reply.
+4. Run diagnostic ① and ②.
+5. Expected fix result: normal Live, ① and ② are all clean.
+6. If a buzzer remains, capture whether `worklet-underflow` appears in the event trace before changing anything else.

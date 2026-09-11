@@ -28,6 +28,7 @@ jobs:
           node --check clean/src/live/transport-v170.js
           node --check clean/src/live/transcribe-v178.js
           node --check clean/src/live/audio-v170.js
+          node --check clean/src/live/live-playback-worklet-v1711.js
           node --check clean/src/live/transcript-v177.js
           node --check clean/src/live/live-v170.js
       - name: Target contracts
@@ -58,7 +59,7 @@ jobs:
           import assert from 'node:assert/strict';
           import { LIVE_MODEL, LIVE_VERSION, buildSetupMessage } from './clean/src/live/config-v170.js';
 
-          assert.equal(LIVE_VERSION, 'v1.7.10');
+          assert.equal(LIVE_VERSION, 'v1.7.11');
           assert.equal(LIVE_MODEL, 'gemini-3.1-flash-live-preview');
           const message = buildSetupMessage();
           assert.equal(message.setup.model, 'models/gemini-3.1-flash-live-preview');
@@ -153,6 +154,55 @@ jobs:
           assert.equal(shouldRebuffer(10, 10.06), true);
           console.log('Gemini Live 300ms jitter buffering: OK');
           NODE
+      - name: Live AudioWorklet continuous queue
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import vm from 'node:vm';
+          import assert from 'node:assert/strict';
+
+          globalThis.sampleRate = 48000;
+          let Processor = null;
+          class StubAudioWorkletProcessor {
+            constructor(){
+              this.port = {
+                messages: [],
+                onmessage: null,
+                postMessage(message){ this.messages.push(message); }
+              };
+            }
+          }
+          globalThis.AudioWorkletProcessor = StubAudioWorkletProcessor;
+          globalThis.registerProcessor = (name, cls) => {
+            assert.equal(name, 'pfc-live-pcm-player');
+            Processor = cls;
+          };
+          vm.runInThisContext(fs.readFileSync('./clean/src/live/live-playback-worklet-v1711.js', 'utf8'));
+          assert.ok(Processor);
+          const player = new Processor({ processorOptions: { targetBufferSec: 0.30 } });
+          const send = data => player.port.onmessage({ data });
+          send({ type: 'push', rate: 24000, samples: new Float32Array(3600).fill(0.25) });
+          send({ type: 'push', rate: 24000, samples: new Float32Array(3600).fill(0.25) });
+          let frames = [];
+          for(let n=0;n<2;n++){
+            const out = new Float32Array(128);
+            player.process([], [[out]]);
+            frames.push(...out);
+          }
+          assert.ok(frames[255] > 0.24);
+          send({ type: 'flush' });
+          for(let n=0;n<200&&!player.port.messages.some(x=>x.type==='drain');n++){
+            const out = new Float32Array(128);
+            player.process([], [[out]]);
+            frames.push(...out);
+          }
+          assert.ok(player.port.messages.some(x=>x.type==='drain'));
+          assert.equal(player.port.messages.some(x=>x.type==='underflow'), false);
+          const steady = frames.slice(300, 13000).filter(x=>x!==0);
+          assert.ok(steady.length > 10000);
+          assert.ok(steady.every(x=>Math.abs(x-0.25)<1e-6));
+          console.log('Gemini Live AudioWorklet continuous queue: OK');
+          NODE
       - name: Live diagnostics and GAS fetch contract
         run: |
           node --input-type=module <<'NODE'
@@ -183,9 +233,11 @@ jobs:
           assert.match(live, /audio\?\.completeModelTurn/);
           assert.match(live, /data-live-action="replay-pcm"/);
           assert.match(live, /data-live-action="replay-pcm-chunked"/);
-          assert.match(live, /audio-v170\.js\?v=1\.7\.10/);
+          assert.match(live, /audio-v170\.js\?v=1\.7\.11/);
           assert.match(audio, /replayLastTurnRaw/);
           assert.match(audio, /replayLastTurnChunked/);
+          assert.match(audio, /live-playback-worklet-v1711\.js\?v=1\.7\.11/);
+          assert.match(audio, /AudioWorkletNode/);
           assert.match(audio, /concatInt16/);
           assert.match(audio, /diagnosticReplayActive/);
           console.log('Live diagnostics, PCM replay, dual-stream, and GAS fetch contract: OK');

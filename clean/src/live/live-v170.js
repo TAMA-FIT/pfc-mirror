@@ -1,10 +1,10 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.10';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.11';
 import { LiveMealDraft } from './draft-v170.js';
 import { GeminiLiveTransport } from './transport-v170.js?v=1.7.8';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
-import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.10';
+import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.11';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
 
 const draft=new LiveMealDraft();
@@ -142,7 +142,8 @@ function render(){
       ${transcribeDiagnosticText?`<div class="pfc-live-diagnostic"><strong>文字起こし</strong><span>${esc(transcribeDiagnosticText)}</span></div>`:''}
       ${traceSummary?`<div class="pfc-live-diagnostic"><strong>音声イベント</strong><span>${esc(traceSummary)}</span></div>`:''}
       <div class="pfc-live-diagnostic"><strong>再生バッファ</strong><span>${Math.round(LIVE_AUDIO_TARGET_BUFFER_SEC*1000)}ms</span></div>
-      ${rawInfo?`<div class="pfc-live-diagnostic"><strong>生PCM診断</strong><span>直前AI音声 ${rawInfo.durationSec.toFixed(1)}秒 / ${rawInfo.chunkCount} chunks。①一括再生は通信間隔とchunk境界を除外。②chunks再生は同じchunk列を通信なしで現在の300msバッファ/再生スケジューラへ再投入します。②だけ鳴れば再生実装側、②も鳴らなければ実通信の到着タイミング側が濃厚です。</span></div>`:''}
+      <div class="pfc-live-diagnostic"><strong>再生エンジン</strong><span>${audio?.getPlaybackMode?.()==='audio-worklet-continuous'?'AudioWorklet 連続ストリーム':'旧BufferSource fallback'}</span></div>
+      ${rawInfo?`<div class="pfc-live-diagnostic"><strong>生PCM診断</strong><span>直前AI音声 ${rawInfo.durationSec.toFixed(1)}秒 / ${rawInfo.chunkCount} chunks。v1.7.10で通常再生と②の両方にブザー、①は正常を確認済み。v1.7.11はchunkごとのAudioBufferSourceを廃止し、1本のAudioWorkletへ連続投入します。①は一括基準、②は新エンジン検証です。</span></div>`:''}
       <div class="pfc-live-conversation">
         ${lastUser?`<div><span>あなた</span><b>${esc(lastUser)}</b></div>`:''}
         ${lastModel?`<div class="model"><span>AI</span><b>${esc(lastModel)}</b></div>`:''}
@@ -159,7 +160,7 @@ function render(){
     </div>
     <div class="sv4-actions pfc-live-actions">
       <button class="primary" data-live-action="register" ${ready?'':'disabled'}>これで登録する</button>
-      ${rawInfo?`<button data-live-action="replay-pcm" ${diagnosticReplayActive?'disabled':''}>${diagnosticReplayActive?'PCM診断を再生中…':'PCM診断①：直前AI音声を一括再生'}</button><button data-live-action="replay-pcm-chunked" ${diagnosticReplayActive?'disabled':''}>${diagnosticReplayActive?'PCM診断を再生中…':'PCM診断②：同じchunksを再生経路で再生'}</button>`:''}
+      ${rawInfo?`<button data-live-action="replay-pcm" ${diagnosticReplayActive?'disabled':''}>${diagnosticReplayActive?'PCM診断を再生中…':'PCM診断①：直前AI音声を一括再生'}</button><button data-live-action="replay-pcm-chunked" ${diagnosticReplayActive?'disabled':''}>${diagnosticReplayActive?'PCM診断を再生中…':'PCM診断②：同じchunksを新エンジンで再生'}</button>`:''}
       <button data-live-action="end">ライブを終了</button>
     </div>`;
 }
@@ -247,6 +248,10 @@ async function startLive(){
   try{
     audio=new LiveAudioIO();
     await audio.prepare();
+    audio.onPlaybackEvent=e=>{
+      if(e?.type==='underflow')addTrace('worklet-underflow');
+      else if(e?.type==='rate-reset')addTrace(`worklet-rate-reset ${e?.sourceRate||''}`.trim());
+    };
     transport=new GeminiLiveTransport({
       onState:s=>{
         sessionState=s;
