@@ -1,0 +1,5 @@
+/* v1.7.16 — nutrition transparency / source labels. */
+.record-source-badge{display:inline-flex;align-items:center;width:max-content;margin:7px 0 0;padding:3px 7px;border-radius:999px;background:#f2f6f3;color:#637269;font-size:10px;font-weight:800;line-height:1.2}
+.record-source-badge.estimate{background:#fff6e8;color:#a96400}
+.nutrition-source-note{margin:18px 8px 92px;padding:0 4px;color:#98a29d;font-size:10px;line-height:1.6;text-align:center}
+#view-settings .nutrition-source-note{margin-bottom:92px}
