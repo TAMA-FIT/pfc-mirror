@@ -4,233 +4,152 @@ Last memory refresh: 2026-09-11 JST
 
 ## Canonical rule
 
-Fresh GitHub `main` is always canonical for code/version state. This file records intent, verified milestones, unresolved defects, and handoff context. If this file and Fresh `main` disagree about code or version, Fresh `main` wins.
+Fresh GitHub `main` is always canonical for code and version state. This file records current architecture, verified milestones, known limits, and release gates. If this file conflicts with Fresh `main`, Fresh `main` wins.
 
-## Current runtime / candidate
+## Public runtime
 
-- Production app before this candidate: **v1.7.10**
-- Production `main` before the v1.7.11 branch: `e6b3dc7cedb12e7a397ad015274b9b62bc2777cc`
-- Current candidate branch: `fix/v1711-audio-worklet-stream`
-- Intended next public version: **v1.7.11**
 - Public URL: `https://tama-fit.github.io/pfc-mirror/`
-- Root `index.html` is an active runtime entrypoint and must be updated together with `clean/index.html` when version/cache markers change.
+- v1.7.18 production main before the current candidate: `ebdc8a9a47c7f270731bccbfbc24fe55b0c8d232`
+- Current candidate: **v1.7.19**
+- Candidate PR: **#46 — Consolidate Gemini Live flow and lifecycle in v1.7.19**
+- Root `index.html` and `clean/index.html` are both active version/cache surfaces and must move together.
 
-## Gemini Live production status
+## Current Gemini Live architecture
 
-Genuine Gemini Live is integrated as a separate path from the legacy normal voice-input path.
-
-Android Chrome real-device testing has verified this sequence end-to-end:
-
-1. Public GitHub Pages app opens Live UI.
-2. App POSTs `taskType: liveToken` to the existing GAS deployment.
-3. GAS V12 issues a short-lived Gemini token without exposing the permanent API key.
-4. Browser opens the Gemini Live WebSocket.
-5. `gemini-3.1-flash-live-preview` reaches `setupComplete`.
-6. Model opens with `何を食べましたか？`.
-7. User can speak naturally across multiple turns.
-8. Gemini responds in natural audio.
-9. `update_meal_draft` Function Calling updates food cards.
-10. Existing deterministic Food Resolver / Food Master / nutrition engine remains authoritative.
-
-The user reports the actual voice conversation quality is now generally good.
-
-## Dedicated display transcription — device verified
-
-v1.7.8 split visible user transcription away from the conversational Live model:
+The production path is Free Tier oriented and must not depend on paid Google Search Grounding.
 
 ```text
-same microphone PCM 16 kHz
-  ├─ Gemini 3.1 Flash Live
-  │    -> conversation / reasoning / audio reply / Function Calling
-  │
-  └─ Gemini 3.5 Transcribe Live
-       -> visible Japanese user transcript only
+microphone
+  -> Gemini 3.1 Flash Live conversation
+  -> update_meal_draft Function Calling
+  -> LiveMealDraft
+  -> trusted Food Master / MEXT resolver
+  -> card preview
+  -> explicit user Register
+  -> deterministic record write
 ```
 
-Current transcription configuration:
+A second `gemini-3.5-transcribe-live` stream remains dedicated to visible Japanese transcription. Permanent Gemini API keys stay in GAS; the browser receives short-lived tokens.
 
-- model: `gemini-3.5-transcribe-live`
-- response modality: `TEXT`
-- language: `ja-JP`
-- mode: `SMART`
-- small PFC/food custom vocabulary
+### v1.7.19 production wiring
 
-Real-device v1.7.8 testing showed a clear improvement. A phrase equivalent to `鶏むねと米と納豆。` displayed correctly while the Live conversational agent also interpreted it correctly.
+`clean/src/main-v160.js` loads the consolidated `live-v1719.js` runtime. The old v1.7.16 Live runtime and `free-tier-search-hotfix-v1717.js` remain historical files only and must not be loaded by the production entrypoint.
 
-The transcriber uses a second ephemeral token from the same GAS V12 endpoint. No additional permanent API key is exposed.
+`config-v1719.js` contains the Free Tier contract directly. There is no runtime WebSocket monkey patch and no `googleSearch` tool in the setup payload.
 
-## Remaining real-device issue: mechanical buzzer / tone
+## Nutrition resolution priority
 
-The user still hears an obviously mechanical buzzer/tone repeatedly during model audio.
+The intended precedence is:
 
-Important observations from v1.7.8 device tracing:
+1. **User-declared package/menu nutrition (`user-label`)** — if the user explicitly reads P/F/C from a product label/menu, keep those exact values. If kcal is absent, derive kcal mechanically with `4P + 9F + 4C` and mark it as derived.
+2. **Trusted local DB** — Food Master / MEXT exact trusted resolution. AI must not overwrite an already resolved DB item with an estimate.
+3. **AI estimate (`ai-estimate`)** — only when the food remains unresolved and the user did not provide explicit nutrition. It is stored/displayed as an estimate, never as official data.
 
-- the app has no intentional buzzer generator
-- the buzzer occurred without an `interrupted` event
-- the same model turn showed model-audio arrival gaps around **213 ms** and **154 ms**
-- tool calling and `turnComplete` still occurred normally
+Paid `official-web` / Google Search is currently disabled in the public Free Tier path.
 
-This makes streaming playback underrun / rebuffer behavior a strong candidate, but malformed/tone-like PCM already present in Gemini output remains possible.
+## Standard amount transparency
 
-Do not call the cause confirmed until the v1.7.9 raw-PCM replay test is done on device.
+Do not invent gram conversions that the source DB does not contain.
 
-## v1.7.9 candidate: true ~300 ms jitter buffer
+Examples:
 
-The old v1.7.7/v1.7.8 playback path scheduled incoming PCM almost immediately with only ~120 ms recovery lead. That was not a real queue and could still run dry when a 150–200+ ms arrival gap occurred.
+- Food Master basis `並` -> display a source-faithful label such as `並（1食）`.
+- A verified conversion such as rice `1杯 = 150g` may show both.
+- If the DB only knows `1個`, `1皿`, `並`, etc., do not fabricate grams.
 
-v1.7.9 changes only the Live model-audio playback path:
+## v1.7.19 turn guard
 
-- target buffer: ~300 ms
-- rebuffer threshold: ~60 ms of scheduled audio remaining
-- initial/recovery playback waits until ~300 ms of PCM has accumulated
-- once buffered, chunks are scheduled contiguously ahead of playback
-- if the scheduled queue runs close to empty, new PCM is accumulated again before resuming
-- short final responses below 300 ms are force-flushed at `turnComplete`
+Real-device v1.7.18 exposed an important failure mode: Gemini could correctly recognize a food verbally but skip `update_meal_draft`. That left the memo empty and Register permanently disabled.
 
-This intentionally trades roughly a few tenths of a second of response latency for stability.
+v1.7.19 adds an app-side recovery layer so correctness does not depend entirely on model tool-call compliance:
 
-## v1.7.9 raw PCM diagnostic replay
+- after a user turn, if the Draft is still empty/pending, the app checks the transcript
+- for a simple food utterance the app can create a provisional Draft item itself
+- trusted Food Master resolution may immediately make it registerable
+- truly unresolved items trigger an internal recovery instruction asking Gemini to use a clear Food Master candidate or attach `ai-estimate` evidence
+- recovery attempts are bounded; normal quantity/skin clarification states are not treated as unresolved-food failures
+- the model must not tell the user to press Register while `ready=false`
 
-The app now retains the exact Gemini model PCM chunks for the last completed model turn in memory only.
+The current Food Master includes `ポテト(L)` with P6 / F25 / C65 / 517 kcal, so the real-device phrase `ポテト（L）` should be recoverable through trusted DB even if Gemini initially only replies verbally.
 
-A diagnostic button appears:
+## Live card contract
 
-`PCM診断：直前AI音声を一括再生`
+Before Register is enabled, the Live card is the user-visible source of truth for what will be saved.
 
-Behavior:
+For a ready item the card must show:
 
-- same-rate PCM chunks are concatenated into one continuous local `AudioBuffer`
-- network arrival timing and normal chunk-by-chunk streaming scheduling are removed from the replay
-- microphone forwarding to both Live sockets is paused while the diagnostic replay is playing so Gemini does not hear its own replay
-- no raw PCM is uploaded or persisted by this diagnostic feature
+- resolved/display food name
+- amount / serving basis
+- source/status (`標準量`, `パッケージ・表示値`, `AI推定・目安`, etc.)
+- kcal and P/F/C preview
 
-Interpretation:
+The Register button is enabled only when `draft.isReady()` is true. Registration then uses the same trusted DB/evidence object shown by the card.
+
+## Browser / microphone lifecycle
+
+Live microphone capture must never silently remain active after the user leaves the Live surface.
+
+v1.7.19 behavior:
+
+- opening Live pushes a same-page history state
+- Android/browser Back while Live is open is treated as closing Live first
+- cleanup closes the transcriber and Live WebSocket and calls `stopCapture()` on the microphone tracks before returning/reloading the home surface
+- `pagehide` and `beforeunload` are emergency release paths
+- **do not auto-close on `visibilitychange` yet**; the user has not decided whether temporarily switching apps should end Live
+
+## Audio playback status
+
+The previous mechanical-buzzer investigation remains resolved at the architecture level by the persistent AudioWorklet playback path. Keep the existing AudioWorklet/diagnostic code unless a new real-device regression proves otherwise.
+
+## Release-gate lesson from v1.7.16-v1.7.18
+
+Do not validate a feature only at schema/function level and then ship it.
+
+For every user-visible Live behavior change, test the complete user journey that the change claims to support. For food recording this means, as applicable:
 
 ```text
-normal Live playback buzzes
-+
-one-piece raw PCM replay is clean
--> browser streaming / jitter scheduling remains the likely source
-
-one-piece raw PCM replay also contains the buzzer
--> the artifact is already present in Gemini-provided PCM or in local PCM decoding itself
+user speech
+ -> transcription/semantic interpretation
+ -> Tool Call OR app-side recovery
+ -> card appears
+ -> correct source/amount/PFC is visible
+ -> draft reaches ready=true
+ -> Register becomes enabled
+ -> saved record matches preview
+ -> leaving Live releases microphone/resources
 ```
 
-This device test is the next decisive step.
+A passing prompt/schema test is not sufficient if the visible card, registration gate, or resource lifecycle has not also been checked.
 
-## GAS / authentication state
+## CI gates for v1.7.19
 
-The user manually deployed **GAS V12**. Keep it unchanged for v1.7.9.
+PR #46 adds/updates contracts covering:
 
-The same Script Properties Gemini API key remains the only permanent key. The browser only receives short-lived tokens.
+- current Live runtime syntax
+- no Google Search in Free Tier setup
+- `ポテト（L）` transcript normalization and real Food Master row presence
+- model-skips-tool -> app provisional card -> trusted Food Master -> `ready=true`
+- true unknown -> internal recovery -> `ai-estimate` -> `ready=true`
+- user package P/F/C -> `user-label` -> derived kcal when needed -> `ready=true`
+- kcal/P/F/C preview in Live cards
+- Register gate tied to Draft readiness
+- browser Back -> Live cleanup -> microphone track stop
+- no automatic `visibilitychange` shutdown
+- production entrypoint uses only v1.7.19 Live runtime
 
-## Live semantic architecture invariant
+CI success is still not a substitute for Android real-device verification.
 
-```text
-microphone audio
-  -> Gemini Live semantic conversation
-  -> update_meal_draft Function Call
-  -> semantic draft validator/store
-  -> immediate UI card update
-  -> background deterministic Food Resolver
-  -> trusted Food ID
-  -> Food Master
-  -> nutrition engine
-  -> explicit Register
-```
+## Immediate Android verification after v1.7.19 deploy
 
-Gemini may interpret food names, quantities, units, references, corrections, deletions, and semantic variants. Gemini must not author P/F/C/A, kcal, Food IDs, nutrition values, or database truth.
+Test the flow, not isolated controls:
 
-## Chicken breast exception
-
-Do not build a generic per-food qualifier rules engine.
-
-The currently explicit product exception is chicken breast only:
-
-- Live must not silently assume skinless when skin state is unknown.
-- Ask naturally for skin-on/skin-off when needed.
-- If quantity is also unknown, Gemini may combine questions naturally.
-- Once clarified, update the same draft item/card.
-
-Do not spread this exception to unrelated foods without real product evidence.
-
-## Legacy normal voice path
-
-The existing normal `話して記録` path remains separate and is intentionally untouched by Live development. A previously observed normal-path dead-end (`鶏胸肉と米と納豆` transcript visible but memo empty) is still not considered device-verified fixed.
-
-Do not solve the normal path by expanding regex rules. Its intended architecture remains:
-
-`flexible semantic AI -> deterministic Food Resolver -> trusted Food ID -> Food Master -> mechanical nutrition`
-
-## Development protocol reminders
-
-- Do not jump from a new symptom straight into production edits.
-- Discuss symptom, target UX, likely cause, scope, and side effects first.
-- Fresh-check `main` before branching and again before merge.
-- Keep Live changes isolated from stable normal AI/voice/storage/nutrition code unless explicitly required.
-- Branch -> CI -> PR/diff -> merge -> real-device verification.
-- CI success is not device success.
-- Every public runtime change gets a visible version bump.
-
-## Immediate device test after v1.7.9 merge
-
-1. Confirm visible `v1.7.9`.
-2. Start Live and confirm `setupComplete` plus dedicated `gemini-3.5-transcribe-live | ja-JP | SMART` transcription.
-3. Speak through at least one full AI reply and listen for the buzzer.
-4. Confirm the Live diagnostic shows `再生バッファ 300ms`.
-5. After the reply completes, press `PCM診断：直前AI音声を一括再生`.
-6. Compare whether the buzzer is present in the one-piece replay.
-7. Report both results separately: `通常再生で鳴った/鳴らない` and `PCM診断再生で鳴った/鳴らない`.
-
-## v1.7.9 real-device result
-
-Observed on Android Chrome on 2026-09-11:
-
-- Normal real-time Live playback: **buzzer reproduced**.
-- `PCM診断：直前AI音声を一括再生`: **no buzzer**.
-- Example captured turn: about 5.7 seconds / 28 PCM chunks.
-- This makes corruption in the model-produced PCM itself unlikely. The next isolation target is the browser chunked playback scheduler versus live network-arrival timing.
-
-## v1.7.10 next device test
-
-v1.7.10 adds a second diagnostic replay using the exact saved PCM chunk sequence and the same 300 ms buffered scheduling path as normal Live playback, but without WebSocket/network arrival gaps.
-
-1. Confirm visible `v1.7.10`.
-2. Produce one AI reply that reproduces or can be compared with the buzzer.
-3. Press `PCM診断①：直前AI音声を一括再生` and confirm the known clean baseline.
-4. Press `PCM診断②：同じchunksを再生経路で再生`.
-5. If ② buzzes while ① is clean, the Web Audio chunk scheduling/boundary path is implicated.
-6. If both ① and ② are clean while normal Live playback buzzes, real network arrival timing / underrun-rebuffer behavior is implicated.
-
-## v1.7.10 real-device result
-
-Android Chrome verification on 2026-09-11 produced the decisive result:
-
-- Normal real-time Live playback: **buzzer reproduced**.
-- Diagnostic ① one-piece raw PCM replay: **clean**.
-- Diagnostic ② exact same saved PCM chunks replayed locally through the old 300 ms BufferSource scheduler: **buzzer reproduced**.
-
-Because diagnostic ② has no WebSocket/network arrival timing, network jitter is not required to reproduce the artifact. The common factor between normal Live and diagnostic ② is the chunk-by-chunk `AudioBufferSourceNode` scheduling path. The one-piece PCM buffer remaining clean strongly implicates node/chunk boundary scheduling rather than the model PCM content itself.
-
-## v1.7.11 continuous AudioWorklet playback candidate
-
-v1.7.11 replaces normal Gemini model-audio output on supported browsers with one persistent `AudioWorkletNode`:
-
-- incoming 24 kHz PCM chunks are queued into one persistent processor instead of creating one `AudioBufferSourceNode` per chunk
-- the processor keeps the existing ~300 ms startup/rebuffer target
-- linear resampling is continuous across chunk boundaries inside the processor
-- a short fade-in is applied on start/rebuffer
-- `turnComplete` flushes any final audio below the 300 ms target
-- interruption resets the persistent queue immediately
-- unsupported browsers retain the old BufferSource path only as an explicit fallback
-- diagnostic ① remains the one-piece PCM baseline
-- diagnostic ② now feeds the same saved chunks through the new AudioWorklet engine
-
-Immediate device verification for v1.7.11:
-
-1. Confirm visible `v1.7.11`.
-2. Confirm `再生エンジン` shows `AudioWorklet 連続ストリーム`.
-3. Listen to a normal Live reply.
-4. Run diagnostic ① and ②.
-5. Expected fix result: normal Live, ① and ② are all clean.
-6. If a buzzer remains, capture whether `worklet-underflow` appears in the event trace before changing anything else.
+1. Confirm visible `v1.7.19`.
+2. Start Live and say `ポテト（L）`.
+3. Even if Gemini initially only answers verbally, confirm a `ポテト(L)` card appears.
+4. Confirm the card shows amount plus kcal/P/F/C and becomes `登録できます`.
+5. Confirm `これで登録する` is enabled and saves the displayed values.
+6. Start another Live session and say a genuinely unregistered product such as `サムライマック`.
+7. Confirm it does not remain permanently unresolved; it should become `AI推定・目安` with kcal/P/F/C and become registerable.
+8. Test a package readout such as `このカツ丼、P18.5、F24、C82` and confirm those values are preserved as `パッケージ・表示値`.
+9. Start Live again and press Android/browser Back instead of `ライブを終了`.
+10. Confirm the app returns to its home surface and the microphone indicator turns off so another app can immediately acquire the mic.

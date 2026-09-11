@@ -3,8 +3,9 @@ name: PFC nutrition resolution check
 on:
   pull_request:
     paths:
-      - 'clean/src/live/*v1716.js'
-      - 'clean/src/live/free-tier-search-hotfix-v1717.js'
+      - 'clean/src/live/config-v1719.js'
+      - 'clean/src/live/draft-v1716.js'
+      - 'clean/src/live/live-v1719.js'
       - 'clean/src/nutrition/evidence-v1716.js'
       - 'clean/src/ui-polish-v1716.js'
       - 'clean/assets/ui-polish-v1716.css'
@@ -22,33 +23,35 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Syntax check v1.7.16 modules
+
+      - name: Syntax check current nutrition runtime
         run: |
-          node --check clean/src/live/config-v1716.js
+          node --check clean/src/live/config-v1719.js
           node --check clean/src/live/draft-v1716.js
-          node --check clean/src/live/transport-v1716.js
-          node --check clean/src/live/live-v1716.js
-          node --check clean/src/live/free-tier-search-hotfix-v1717.js
+          node --check clean/src/live/live-v1719.js
           node --check clean/src/nutrition/evidence-v1716.js
           node --check clean/src/ui-polish-v1716.js
-      - name: Gemini Live search and schema contract
+
+      - name: Gemini Live nutrition schema contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1716.js';
-          assert.equal(LIVE_VERSION,'v1.7.16');
+          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1719.js';
+          assert.equal(LIVE_VERSION,'v1.7.19');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
-          assert.deepEqual(setup.tools[0],{googleSearch:{}});
-          assert.equal(setup.tools[1].functionDeclarations[0].name,'update_meal_draft');
+          assert.equal(setup.tools.length,1);
+          assert.equal(setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
+          assert.equal(JSON.stringify(setup.tools).includes('googleSearch'),false);
           const props=UPDATE_MEAL_DRAFT_DECLARATION.parametersJsonSchema.properties.operations.items.properties;
           for(const key of ['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']) assert.ok(props[key]);
+          assert.deepEqual(props.nutritionSource.enum,['user-label','ai-estimate']);
           assert.match(SYSTEM_INSTRUCTION,/ユーザー自身がパッケージ/);
-          assert.match(SYSTEM_INSTRUCTION,/unresolved の食品だけ、Google Search/);
           assert.match(SYSTEM_INSTRUCTION,/nutritionSource="ai-estimate"/);
-          assert.match(SYSTEM_INSTRUCTION,/普通の量/);
-          console.log('Gemini Live v1.7.16 base search/schema contract: OK');
+          assert.match(SYSTEM_INSTRUCTION,/Food Masterで解決済みの食品をAI推定で上書きしてはいけません/);
+          console.log('Gemini Live v1.7.19 nutrition schema: OK');
           NODE
+
       - name: Nutrition evidence precedence
         run: |
           node --input-type=module <<'NODE'
@@ -59,18 +62,19 @@ jobs:
           assert.equal(label.kcalDerived,true);
           const db={foodId:'food:1',unresolved:false,needsSkin:false,needsAmount:false,amount:1,nutritionEvidence:label};
           assert.equal(chooseNutritionMode(db).mode,'evidence');
-          const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:30,f:20,c:45,kcal:480,sourceLabel:'公式',sourceUrl:'https://example.com/official',servingLabel:'1個'});
-          assert.equal(chooseNutritionMode({...db,nutritionEvidence:official}).mode,'trusted-db');
-          const unknown={name:'新商品',foodId:null,unresolved:true,needsSkin:false,needsAmount:false,amount:null,meal:'昼',nutritionEvidence:official};
+
+          const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
+          assert.equal(chooseNutritionMode({...db,nutritionEvidence:estimate}).mode,'trusted-db');
+          const unknown={name:'新商品',foodId:null,unresolved:true,needsSkin:false,needsAmount:false,amount:null,meal:'昼',nutritionEvidence:estimate};
           assert.equal(chooseNutritionMode(unknown).mode,'evidence');
           const record=buildEvidenceRecord(unknown,123);
           assert.equal(record.Cal,480);
-          assert.equal(record._clean.nutritionSource,'official-web');
+          assert.equal(record._clean.nutritionSource,'ai-estimate');
           assert.equal(record.N,'新商品(1個)');
-          assert.throws(()=>normalizeNutritionEvidence({nutritionSource:'official-web',p:1,f:2,c:3}),/sourceUrl/);
           console.log('Nutrition evidence precedence: OK');
           NODE
-      - name: Draft standard amount and unresolved fallback
+
+      - name: Draft standard amount, AI estimate and user-label flow
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -80,6 +84,7 @@ jobs:
             ['🏪コンビニ','カツ丼','かつどん どんぶり コンビニ ごはん 米 肉','1個',25,30,100,800]
           ];
           const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js');
+
           const curry=new LiveMealDraft();
           let result=curry.applyFunctionCall({id:'1',args:{operations:[{op:'add',name:'カレーライス'}]}});
           assert.equal(result.ready,true);
@@ -101,27 +106,29 @@ jobs:
           assert.equal(result.ready,true);
           assert.equal(result.draft[0].nutritionMode,'evidence');
           assert.equal(result.draft[0].nutritionEvidence.kcal,618);
-          console.log('Draft fallback scenarios: OK');
+          console.log('Draft resolution scenarios: OK');
           NODE
+
       - name: Runtime wiring and UI transparency
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          const live=fs.readFileSync('./clean/src/live/live-v1716.js','utf8');
+          const live=fs.readFileSync('./clean/src/live/live-v1719.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
-          assert.match(entry,/free-tier-search-hotfix-v1717\.js\?v=1\.7\.18/);
-          assert.match(entry,/live-v1716\.js\?v=1\.7\.18/);
+          assert.match(entry,/live-v1719\.js\?v=1\.7\.19/);
+          assert.doesNotMatch(entry,/free-tier-search-hotfix-v1717/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.16/);
           assert.match(live,/buildEvidenceRecord/);
           assert.match(live,/record\._clean\.displayAmount=item\.standardLabel/);
+          assert.match(live,/itemNutritionLine/);
           assert.match(ui,/日本食品標準成分表/);
           assert.match(ui,/record-source-badge/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.18/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.18/);
+            assert.match(html,/v1\.7\.19/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.19/);
           }
           console.log('Runtime wiring/UI transparency: OK');
           NODE
