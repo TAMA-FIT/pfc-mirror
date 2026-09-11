@@ -108,42 +108,52 @@ jobs:
           console.log('Draft resolution scenarios: OK');
           NODE
 
-      - name: Candidate-aware official lookup cache
+      - name: Candidate-aware official lookup cache and diagnostics exports
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
-          const {nutritionLookupCacheKey}=await import('./clean/src/live/nutrition-lookup-v1720.js');
+          const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
+          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,getLookupDiagnostics,formatLookupDiagnosticsText}=mod;
           const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
           const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
           assert.notEqual(a,b);
-          console.log('Candidate-aware cache key: OK');
+          assert.match(NUTRITION_LOOKUP_VERSION,/v1\.7\.23-persistent-diagnostics/);
+          assert.equal(typeof getLookupDiagnostics,'function');
+          assert.equal(typeof formatLookupDiagnosticsText,'function');
+          console.log('Candidate-aware cache + persistent diagnostics exports: OK');
           NODE
 
-      - name: Runtime wiring and UI transparency
+      - name: Runtime wiring and persistent diagnostic UI
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
+          const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
           const legacyUi=fs.readFileSync('./clean/src/ui-polish-v1715.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.22/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.23/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.22/);
           assert.match(live,/config-v1720\.js\?v=1\.7\.21/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.21/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.23/);
+          assert.match(live,/lookupDiagnosticPanelHtml/);
+          assert.match(live,/data-lookup-diagnostic-panel/);
+          assert.match(live,/copy-lookup-diag/);
           assert.match(live,/ユーザー発話:/);
           assert.match(live,/candidateNames:candidates/);
           assert.match(live,/nutritionSource:'official-web'/);
           assert.match(live,/buildEvidenceRecord/);
+          assert.match(lookup,/lookupDiagnosticListeners/);
+          assert.doesNotMatch(lookup,/document\.querySelector/);
           assert.match(ui,/日本食品標準成分表/);
           assert.match(ui,/record-source-badge/);
           assert.doesNotMatch(legacyUi,/badge\.textContent\s*=\s*APP_VERSION/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
             assert.match(html,/v1\.7\.21/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.22/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.23/);
           }
-          console.log('v1.7.21 runtime/UI with v1.7.22 cache bust: OK');
+          console.log('v1.7.21 runtime/UI with persistent lookup diagnostics and v1.7.23 cache bust: OK');
           NODE
