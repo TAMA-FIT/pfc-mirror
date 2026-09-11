@@ -22,8 +22,8 @@ function sourceLabel(record){
   return '';
 }
 function patchVersion(){
-  const badge=document.querySelector('.app-build-version');
-  if(badge&&badge.textContent!==UI_V1716_VERSION)badge.textContent=UI_V1716_VERSION;
+  // Build/version ownership belongs to the current app/Live runtime.
+  // This legacy UI polish module must never overwrite the badge with v1.7.16.
 }
 function patchRecordCards(){
   const records=readRecords();
