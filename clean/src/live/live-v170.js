@@ -1,10 +1,10 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.8';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.9';
 import { LiveMealDraft } from './draft-v170.js';
 import { GeminiLiveTransport } from './transport-v170.js?v=1.7.8';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
-import { LiveAudioIO } from './audio-v170.js?v=1.7.8';
+import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.9';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
 
 const draft=new LiveMealDraft();
@@ -27,6 +27,7 @@ let traceEvents=[];
 let lastAudioArrivalMs=0;
 let audioBurstCount=0;
 let audioChunkCount=0;
+let diagnosticReplayActive=false;
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
 function statusText(){
@@ -128,6 +129,7 @@ function render(){
   const items=draft.snapshot();
   const ready=draft.isReady();
   const traceSummary=traceEvents.length?`${traceEvents.join(' → ')} | audio chunks=${audioChunkCount}`:'';
+  const rawInfo=audio?.getLastTurnRawInfo?.()||null;
   sheet.innerHTML=`
     <div class="sv4-header pfc-live-head">
       <button type="button" class="close-btn" data-live-action="end" aria-label="終了">‹</button>
@@ -139,6 +141,8 @@ function render(){
       ${diagnosticText?`<div class="pfc-live-diagnostic"><strong>診断</strong><span>${esc(diagnosticText)}</span></div>`:''}
       ${transcribeDiagnosticText?`<div class="pfc-live-diagnostic"><strong>文字起こし</strong><span>${esc(transcribeDiagnosticText)}</span></div>`:''}
       ${traceSummary?`<div class="pfc-live-diagnostic"><strong>音声イベント</strong><span>${esc(traceSummary)}</span></div>`:''}
+      <div class="pfc-live-diagnostic"><strong>再生バッファ</strong><span>${Math.round(LIVE_AUDIO_TARGET_BUFFER_SEC*1000)}ms</span></div>
+      ${rawInfo?`<div class="pfc-live-diagnostic"><strong>生PCM診断</strong><span>直前AI音声 ${rawInfo.durationSec.toFixed(1)}秒 / ${rawInfo.chunkCount} chunks。下のボタンは通信間隔を除いて1本に連結した生PCMを再生します。</span></div>`:''}
       <div class="pfc-live-conversation">
         ${lastUser?`<div><span>あなた</span><b>${esc(lastUser)}</b></div>`:''}
         ${lastModel?`<div class="model"><span>AI</span><b>${esc(lastModel)}</b></div>`:''}
@@ -155,6 +159,7 @@ function render(){
     </div>
     <div class="sv4-actions pfc-live-actions">
       <button class="primary" data-live-action="register" ${ready?'':'disabled'}>これで登録する</button>
+      ${rawInfo?`<button data-live-action="replay-pcm" ${diagnosticReplayActive?'disabled':''}>${diagnosticReplayActive?'PCM診断を再生中…':'PCM診断：直前AI音声を一括再生'}</button>`:''}
       <button data-live-action="end">ライブを終了</button>
     </div>`;
 }
@@ -237,7 +242,7 @@ function handleTranscriberState(state){
 async function startLive(){
   if(transport)return;
   errorText='';diagnosticText=`app ${LIVE_VERSION}`;transcribeDiagnosticText='専用文字起こしを準備しています…';registeredCount=0;lastUser='';lastModel='';transcriptSpeaker='none';draft.clear();
-  traceStartMs=performance.now();traceEvents=[];lastAudioArrivalMs=0;audioBurstCount=0;audioChunkCount=0;transcriberReady=false;
+  traceStartMs=performance.now();traceEvents=[];lastAudioArrivalMs=0;audioBurstCount=0;audioChunkCount=0;transcriberReady=false;diagnosticReplayActive=false;
   ensureModal().hidden=false;sessionState='token';render();
   try{
     audio=new LiveAudioIO();
@@ -246,6 +251,7 @@ async function startLive(){
       onState:s=>{
         sessionState=s;
         if(s==='turn-complete'){
+          audio?.completeModelTurn?.();
           lastUser=lastUser.trim();
           lastModel=lastModel.trim();
           transcriptSpeaker='complete';
@@ -290,6 +296,7 @@ async function startLive(){
     }
 
     await audio.startCapture(bytes=>{
+      if(diagnosticReplayActive)return;
       transport?.sendAudio(bytes);
       transcriber?.sendAudio(bytes);
     });
@@ -321,6 +328,22 @@ async function registerDraft(){
   transport?.sendText(`__PFC_DRAFT_COMMITTED__ ユーザー操作で${records.length}件の食事を登録しました。現在のDraftは空です。以前のrefは今後update/removeに使わないでください。短く「登録しました」と伝え、追加があればそのまま聞いてください。`);
 }
 
+async function replayRawPcm(){
+  if(!audio?.hasLastTurnRaw?.()||diagnosticReplayActive)return;
+  diagnosticReplayActive=true;
+  addTrace('pcm-replay start');
+  render();
+  try{
+    const info=await audio.replayLastTurnRaw();
+    addTrace(`pcm-replay end ${info?.durationSec?.toFixed?.(1)||'?'}s`);
+  }catch(e){
+    addTrace(`pcm-replay error ${String(e?.message||e)}`);
+  }finally{
+    diagnosticReplayActive=false;
+    render();
+  }
+}
+
 async function endLive(){
   try{transcriber?.close()}catch{}transcriber=null;transcriberReady=false;
   try{transport?.close()}catch{}transport=null;
@@ -335,6 +358,7 @@ document.addEventListener('click',e=>{
   if(action==='start'){e.preventDefault();startLive()}
   else if(action==='end'){e.preventDefault();endLive()}
   else if(action==='register'){e.preventDefault();registerDraft()}
+  else if(action==='replay-pcm'){e.preventDefault();replayRawPcm()}
   else if(action==='remove'){e.preventDefault();draft.removeLocal(button.dataset.ref);render()}
 });
 
@@ -347,4 +371,4 @@ loadCss();ensureModal();
 const observer=new MutationObserver(queuePatch);
 for(const id of ['view-home','view-settings']){const el=document.getElementById(id);if(el)observer.observe(el,{childList:true,subtree:true,attributes:true,attributeFilter:['hidden']})}
 queuePatch();
-console.info('[PFC Gemini Live experiment]',{version:LIVE_VERSION,transcriber:TRANSCRIBE_MODEL});
+console.info('[PFC Gemini Live experiment]',{version:LIVE_VERSION,transcriber:TRANSCRIBE_MODEL,audioBufferMs:LIVE_AUDIO_TARGET_BUFFER_SEC*1000});
