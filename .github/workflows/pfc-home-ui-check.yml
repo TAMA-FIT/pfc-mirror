@@ -56,8 +56,8 @@ jobs:
           assert.match(entry, /ui-polish-v1715\.js\?v=1\.7\.15/);
           for (const path of ['index.html','clean/index.html']) {
             const html = fs.readFileSync(path, 'utf8');
-            assert.match(html, /v1\.7\.15/);
-            assert.match(html, /main-v160\.js\?v=1\.7\.15/);
+            assert.match(html, /v1\.7\.16/);
+            assert.match(html, /main-v160\.js\?v=1\.7\.16/);
           }
-          console.log('PFC v1.7.15 home UI contracts: OK');
+          console.log('PFC v1.7.15 home UI layer remains valid under v1.7.16 entrypoint: OK');
           NODE
