@@ -8,10 +8,10 @@ Fresh GitHub `main` is always canonical for code/version state. This file record
 
 ## Current runtime / candidate
 
-- Production app before this candidate: **v1.7.8**
-- Production `main` before the v1.7.9 branch: `c31a187648f330608d23a530ef5d4624ba4e1ee4`
-- Current candidate branch: `fix/v179-live-pcm-jitter-diagnostic`
-- Intended next public version: **v1.7.9**
+- Production app before this candidate: **v1.7.9**
+- Production `main` before the v1.7.10 branch: `2264793cd3668fb1abe2619b34bd2f35d101351d`
+- Current candidate branch: `fix/v180-realtime-replay-diagnostic`
+- Intended next public version: **v1.7.10**
 - Public URL: `https://tama-fit.github.io/pfc-mirror/`
 - Root `index.html` is an active runtime entrypoint and must be updated together with `clean/index.html` when version/cache markers change.
 
@@ -181,3 +181,23 @@ Do not solve the normal path by expanding regex rules. Its intended architecture
 5. After the reply completes, press `PCM診断：直前AI音声を一括再生`.
 6. Compare whether the buzzer is present in the one-piece replay.
 7. Report both results separately: `通常再生で鳴った/鳴らない` and `PCM診断再生で鳴った/鳴らない`.
+
+## v1.7.9 real-device result
+
+Observed on Android Chrome on 2026-09-11:
+
+- Normal real-time Live playback: **buzzer reproduced**.
+- `PCM診断：直前AI音声を一括再生`: **no buzzer**.
+- Example captured turn: about 5.7 seconds / 28 PCM chunks.
+- This makes corruption in the model-produced PCM itself unlikely. The next isolation target is the browser chunked playback scheduler versus live network-arrival timing.
+
+## v1.7.10 next device test
+
+v1.7.10 adds a second diagnostic replay using the exact saved PCM chunk sequence and the same 300 ms buffered scheduling path as normal Live playback, but without WebSocket/network arrival gaps.
+
+1. Confirm visible `v1.7.10`.
+2. Produce one AI reply that reproduces or can be compared with the buzzer.
+3. Press `PCM診断①：直前AI音声を一括再生` and confirm the known clean baseline.
+4. Press `PCM診断②：同じchunksを再生経路で再生`.
+5. If ② buzzes while ① is clean, the Web Audio chunk scheduling/boundary path is implicated.
+6. If both ① and ② are clean while normal Live playback buzzes, real network arrival timing / underrun-rebuffer behavior is implicated.

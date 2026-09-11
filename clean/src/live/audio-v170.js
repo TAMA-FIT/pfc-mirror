@@ -139,13 +139,10 @@ export class LiveAudioIO{
     return true;
   }
 
-  play(base64,mimeType='audio/pcm;rate=24000'){
-    if(!this.ctx||!base64)return;
-    const pcm=base64ToInt16(base64);
-    if(!pcm.length)return;
-    const rate=mimeRate(mimeType);
+  _queuePcmChunk(pcm,rate,{captureRaw=true}={}){
+    if(!this.ctx||!pcm?.length)return;
     const chunk={pcm:new Int16Array(pcm),rate,duration:pcm.length/rate};
-    this.rawCurrent.push({pcm:new Int16Array(pcm),rate});
+    if(captureRaw)this.rawCurrent.push({pcm:new Int16Array(pcm),rate});
 
     const now=this.ctx.currentTime;
     if(this.playbackActive&&!shouldRebuffer(now,this.playAt)){
@@ -157,6 +154,13 @@ export class LiveAudioIO{
     this.pending.push(chunk);
     this.pendingDuration+=chunk.duration;
     this._startBufferedPlayback(false);
+  }
+
+  play(base64,mimeType='audio/pcm;rate=24000'){
+    if(!this.ctx||!base64)return;
+    const pcm=base64ToInt16(base64);
+    if(!pcm.length)return;
+    this._queuePcmChunk(pcm,mimeRate(mimeType),{captureRaw:true});
   }
 
   completeModelTurn(){
@@ -220,6 +224,23 @@ export class LiveAudioIO{
           }catch(e){reject(e)}
         });
       }
+      return this.getLastTurnRawInfo();
+    }finally{
+      this.diagnosticReplayActive=false;
+    }
+  }
+
+  async replayLastTurnChunked(){
+    if(!this.ctx||!this.hasLastTurnRaw())throw new Error('再生できる直前AI音声がありません');
+    this._stopOutput({clearPending:true,discardCapture:false});
+    this.diagnosticReplayActive=true;
+    try{
+      const segments=this.lastRawTurn.segments.map(x=>({pcm:new Int16Array(x.pcm),rate:x.rate}));
+      for(const segment of segments)this._queuePcmChunk(segment.pcm,segment.rate,{captureRaw:false});
+      this._startBufferedPlayback(true);
+      const endAt=this.playAt;
+      const waitMs=Math.max(0,(endAt-this.ctx.currentTime)*1000)+80;
+      await new Promise(resolve=>setTimeout(resolve,waitMs));
       return this.getLastTurnRawInfo();
     }finally{
       this.diagnosticReplayActive=false;
