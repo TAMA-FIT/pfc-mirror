@@ -7,6 +7,7 @@ on:
       - 'clean/src/live/transport-v1720.js'
       - 'clean/src/live/live-guard-v1720.js'
       - 'clean/src/live/nutrition-lookup-v1720.js'
+      - 'clean/src/live/nutrition-routing-hotfix-v1721.js'
       - 'clean/src/live/live-v1720.js'
       - 'clean/src/live/draft-v1716.js'
       - 'clean/src/nutrition/evidence-v1716.js'
@@ -34,6 +35,7 @@ jobs:
           node --check clean/src/live/transport-v1720.js
           node --check clean/src/live/live-guard-v1720.js
           node --check clean/src/live/nutrition-lookup-v1720.js
+          node --check clean/src/live/nutrition-routing-hotfix-v1721.js
           node --check clean/src/live/live-v1720.js
 
       - name: Live remains Free Tier and delegates Search
@@ -111,6 +113,7 @@ jobs:
           import fs from 'node:fs';
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const guard=fs.readFileSync('./clean/src/live/live-guard-v1720.js','utf8');
+          const routing=fs.readFileSync('./clean/src/live/nutrition-routing-hotfix-v1721.js','utf8');
           assert.match(live,/lookupOfficialNutrition/);
           assert.match(live,/startOfficialLookups/);
           assert.match(live,/lookupPendingFor/);
@@ -119,7 +122,10 @@ jobs:
           assert.match(live,/if\(started>0\|\|lookupPendingFor\(items\)\)return/);
           assert.match(guard,/__PFC_OFFICIAL_LOOKUP_NOT_FOUND__/);
           assert.match(guard,/最後の手段/);
-          console.log('Search-before-AI fallback ordering: OK');
+          assert.match(routing,/__SEARCH_OFFICIAL__/);
+          assert.match(routing,/prematureAi/);
+          assert.match(routing,/armAiEstimateFallbackOnce/);
+          console.log('Search-before-AI fallback ordering + routing hotfix: OK');
           NODE
 
       - name: GAS V13 security and quota contract
@@ -157,18 +163,19 @@ jobs:
           console.log('Browser-back mic release remains intact: OK');
           NODE
 
-      - name: Production wiring uses v1.7.20
+      - name: Production wiring uses v1.7.20 with routing hotfix
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.20/);
+          assert.match(entry,/nutrition-routing-hotfix-v1721\.js\?v=1\.7\.21/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.21/);
           assert.doesNotMatch(entry,/live-v1719\.js/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
             assert.match(html,/v1\.7\.20/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.20/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.21/);
           }
-          console.log('v1.7.20 production wiring: OK');
+          console.log('v1.7.20 production wiring + official-first routing hotfix: OK');
           NODE
