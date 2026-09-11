@@ -1,7 +1,7 @@
-import { GAS_URL } from './config-v1720.js?v=1.7.24';
+import { GAS_URL } from './config-v1720.js?v=1.7.25';
 
-export const NUTRITION_LOOKUP_VERSION='v1.7.24-truth-sync';
-export const NUTRITION_LOOKUP_MODEL='gemini-2.5-flash';
+export const NUTRITION_LOOKUP_VERSION='v1.7.25-tavily';
+export const NUTRITION_LOOKUP_MODEL='Tavily + Gemini 3.1 Flash Lite';
 export const NUTRITION_LOOKUP_TIMEOUT_MS=22000;
 export const NUTRITION_LOOKUP_CACHE_TTL_MS=30*24*60*60*1000;
 const CACHE_KEY='pfc-official-nutrition-cache-v2';
@@ -29,16 +29,18 @@ function diagnosticSummary(body={}){
   if(body.errorCode)parts.push(`code=${sanitize(body.errorCode,60)}`);
   if(body.ok===false)parts.push('ok=false');
   if(body.gasBuild)parts.push(`gas=${sanitize(body.gasBuild,80)}`);
-  if(body.model)parts.push(`model=${sanitize(body.model,60)}`);
+  if(body.searchProvider)parts.push(`search=${sanitize(body.searchProvider,40)}`);
+  if(body.model)parts.push(`extract=${sanitize(body.model,60)}`);
   if(body.httpStatus)parts.push(`upstreamHTTP=${sanitize(body.httpStatus,20)}`);
   if(body.officialFetchStatus)parts.push(`officialHTTP=${sanitize(body.officialFetchStatus,20)}`);
-  if(body.googleStatus)parts.push(`google=${sanitize(body.googleStatus,120)}`);
+  if(body.verificationMethod)parts.push(`verify=${sanitize(body.verificationMethod,80)}`);
+  if(body.searchCredits!=null)parts.push(`credits=${sanitize(body.searchCredits,20)}`);
+  if(body.tavilyRequestId)parts.push(`tavilyRequest=${sanitize(body.tavilyRequestId,80)}`);
   if(body.grounded===true)parts.push('grounded=true');
   if(body.grounded===false)parts.push('grounded=false');
-  if(body.verificationMethod)parts.push(`verify=${sanitize(body.verificationMethod,80)}`);
   if(body.message)parts.push(`message=${sanitize(body.message,180)}`);
   if(Array.isArray(body.webSearchQueries)&&body.webSearchQueries.length){
-    parts.push(`queries=${body.webSearchQueries.map(x=>sanitize(x,80)).filter(Boolean).slice(0,4).join(' / ')}`);
+    parts.push(`queries=${body.webSearchQueries.map(x=>sanitize(x,100)).filter(Boolean).slice(0,4).join(' / ')}`);
   }
   if(body.productName)parts.push(`product=${sanitize(body.productName,100)}`);
   if(body.sourceDomain)parts.push(`source=${sanitize(body.sourceDomain,100)}`);
@@ -135,9 +137,10 @@ export function validateGroundedNutrition(raw={}){
     brand:text(raw.brand),productName:text(raw.productName),servingLabel,
     p:round1(p),f:round1(f),c:round1(c),kcal:Math.round(kcal),
     sourceLabel:text(raw.sourceLabel)||'公式情報',sourceUrl,sourceDomain:text(raw.sourceDomain),
-    model:text(raw.model)||NUTRITION_LOOKUP_MODEL,verifiedAt:text(raw.verifiedAt)||new Date().toISOString(),
-    resolutionNote:text(raw.resolutionNote),verificationMethod:text(raw.verificationMethod),
-    officialFetchStatus:num(raw.officialFetchStatus),gasBuild:text(raw.gasBuild),
+    model:text(raw.model)||'gemini-3.1-flash-lite',searchProvider:text(raw.searchProvider)||'tavily',
+    verifiedAt:text(raw.verifiedAt)||new Date().toISOString(),resolutionNote:text(raw.resolutionNote),
+    verificationMethod:text(raw.verificationMethod),officialFetchStatus:num(raw.officialFetchStatus),gasBuild:text(raw.gasBuild),
+    tavilyRequestId:text(raw.tavilyRequestId),searchCredits:num(raw.searchCredits),
     webSearchQueries:Array.isArray(raw.webSearchQueries)?raw.webSearchQueries.map(text).filter(Boolean).slice(0,8):[]
   };
 }
@@ -152,28 +155,25 @@ export function buildNutritionLookupPayload({foodName='',contextText='',candidat
 function classifyBody(body={}){
   const status=text(body.status);
   const message=text(body.message);
+  const code=text(body.errorCode);
   const upstream=num(body.httpStatus);
   const official=num(body.officialFetchStatus);
-  if(status==='quota_exhausted'||/quota|daily safety cap/i.test(message))return 'QUOTA';
-  if(upstream===429)return 'UPSTREAM_429';
-  if(upstream!=null&&upstream>=500)return 'UPSTREAM_5XX';
+  if(status==='quota_exhausted'||/TAVILY_MONTHLY_CAP|quota|safety cap/i.test(`${code} ${message}`))return 'QUOTA';
+  if(upstream===429||/TAVILY_RATE_LIMIT|EXTRACTOR_RATE_LIMIT/i.test(code))return 'PROVIDER_429';
+  if(upstream!=null&&upstream>=500)return 'PROVIDER_5XX';
   if(official===404||/official page.*404|HTTP 404/i.test(message))return 'OFFICIAL_URL_404';
-  if(/grounding/i.test(message))return 'GROUNDING_VALIDATION';
   if(status==='not_found')return 'NOT_FOUND';
-  if(body.ok===false)return 'UPSTREAM_ERROR';
+  if(body.ok===false)return code||'UPSTREAM_ERROR';
   return '';
-}
-function shouldTransientRetry(body={}){const code=classifyBody(body);return code==='UPSTREAM_429'||code==='UPSTREAM_5XX'}
-function shouldRepairRetry(body={}){return classifyBody(body)==='OFFICIAL_URL_404'}
-function repairPayload(payload){
-  const hint='再検索指示: 前回の公式URLが404/無効でした。古いURLを再利用せず、日本公式サイト内で現行の商品ページまたは栄養表を検索し直し、実在するURLだけ返してください。';
-  return {...payload,contextText:`${hint} ${text(payload.contextText)}`.slice(0,240)};
 }
 async function performRequest(payload,{attempt=1,label='primary'}={}){
   const started=performance.now();
   const controller=new AbortController();
   const timer=setTimeout(()=>controller.abort(),NUTRITION_LOOKUP_TIMEOUT_MS);
-  addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:`request-${label}-${attempt}`,summary:`GASへ送信 / model=${NUTRITION_LOOKUP_MODEL} / timeout=${NUTRITION_LOOKUP_TIMEOUT_MS}ms`});
+  addLookupDiagnostic({
+    foodName:payload.foodName,candidateNames:payload.candidateNames,stage:`request-${label}-${attempt}`,
+    summary:`GASへ送信 / search=Tavily / extract=Gemini 3.1 Flash Lite / timeout=${NUTRITION_LOOKUP_TIMEOUT_MS}ms`
+  });
   try{
     const response=await fetch(GAS_URL,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(payload),redirect:'follow',signal:controller.signal});
     const rawText=await response.text();let body;
@@ -183,7 +183,7 @@ async function performRequest(payload,{attempt=1,label='primary'}={}){
     }
     const errorCode=classifyBody(body);
     addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:response.ok?'response':'http-error',elapsedMs:performance.now()-started,body:{...body,clientHttpStatus:response.status,errorCode}});
-    return {response,body,errorCode,elapsedMs:performance.now()-started};
+    return {response,body,errorCode};
   }catch(error){
     const elapsedMs=performance.now()-started;
     if(error?.name==='AbortError'){
@@ -197,15 +197,19 @@ async function performRequest(payload,{attempt=1,label='primary'}={}){
 function publicNotFound(body,errorCode){
   return {
     status:text(body?.status)||'not_found',message:text(body?.message),errorCode:errorCode||classifyBody(body),
-    model:text(body?.model)||NUTRITION_LOOKUP_MODEL,gasBuild:text(body?.gasBuild),grounded:body?.grounded===true,
-    httpStatus:num(body?.httpStatus),officialFetchStatus:num(body?.officialFetchStatus),googleStatus:text(body?.googleStatus),
+    model:text(body?.model)||'gemini-3.1-flash-lite',searchProvider:text(body?.searchProvider)||'tavily',gasBuild:text(body?.gasBuild),
+    grounded:body?.grounded===true,httpStatus:num(body?.httpStatus),officialFetchStatus:num(body?.officialFetchStatus),
+    tavilyRequestId:text(body?.tavilyRequestId),searchCredits:num(body?.searchCredits),
     webSearchQueries:Array.isArray(body?.webSearchQueries)?body.webSearchQueries.map(text).filter(Boolean).slice(0,8):[]
   };
 }
 
 export async function lookupOfficialNutrition(input,{force=false}={}){
   const payload=buildNutritionLookupPayload(input);
-  if(!force){const hit=cachedResult(payload);if(hit){addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'cache-hit',elapsedMs:0,body:hit});return {...hit,cacheHit:true}}}
+  if(!force){
+    const hit=cachedResult(payload);
+    if(hit){addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'cache-hit',elapsedMs:0,body:hit});return {...hit,cacheHit:true}}
+  }
 
   let first;
   try{first=await performRequest(payload,{attempt:1,label:'primary'})}
@@ -216,28 +220,14 @@ export async function lookupOfficialNutrition(input,{force=false}={}){
     }else throw error;
   }
 
-  let {response,body,errorCode}=first;
+  const {response,body,errorCode}=first;
   if(!response.ok)throw new Error(`nutrition lookup GAS HTTP ${response.status}`);
-
-  if(body?.ok===false&&shouldTransientRetry(body)){
-    await sleep(errorCode==='UPSTREAM_429'?700:350);
-    const retry=await performRequest(payload,{attempt:2,label:'upstream-retry'});
-    response=retry.response;body=retry.body;errorCode=retry.errorCode;
-  }
-
-  if(body?.ok===false) {
+  if(body?.ok===false){
     const error=new Error(text(body?.message)||text(body?.error)||'nutrition lookup failed');
     error.lookupCode=errorCode||'UPSTREAM_ERROR';throw error;
   }
-
-  if(text(body?.status)!=='verified'&&shouldRepairRetry(body)){
-    addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'repair-search',summary:'公式URL 404/無効のため、日本公式サイト内で現行URLを1回だけ再探索'});
-    const repaired=repairPayload(payload);
-    const retry=await performRequest(repaired,{attempt:2,label:'official-url-repair'});
-    if(retry.response.ok&&retry.body?.ok!==false){response=retry.response;body=retry.body;errorCode=retry.errorCode}
-  }
-
   if(text(body?.status)!=='verified')return publicNotFound(body,errorCode);
+
   const result=validateGroundedNutrition(body);
   cacheResult(payload,result);
   addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'verified',body:{...body,clientHttpStatus:response.status,errorCode:''}});
