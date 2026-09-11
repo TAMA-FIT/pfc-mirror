@@ -36,12 +36,12 @@ jobs:
           node --check clean/src/nutrition/evidence-v1716.js
           node --check clean/src/ui-polish-v1716.js
 
-      - name: Gemini Live nutrition schema contract
+      - name: Gemini Live semantic-to-grounded nutrition contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1720.js';
-          assert.equal(LIVE_VERSION,'v1.7.20');
+          assert.equal(LIVE_VERSION,'v1.7.21');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
@@ -51,9 +51,12 @@ jobs:
           for(const key of ['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']) assert.ok(props[key]);
           assert.deepEqual(props.nutritionSource.enum,['user-label','ai-estimate']);
           assert.match(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
-          assert.match(SYSTEM_INSTRUCTION,/すぐにAI推定値を作らないでください/);
+          assert.match(SYSTEM_INSTRUCTION,/普通のやつ/);
+          assert.match(SYSTEM_INSTRUCTION,/検索用の仮説/);
+          assert.match(SYSTEM_INSTRUCTION,/現行ラインナップ/);
+          assert.match(SYSTEM_INSTRUCTION,/すぐにAI推定へ落とさず/);
           assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側のGoogle検索経路だけ/);
-          console.log('Gemini Live v1.7.20 grounded-search policy: OK');
+          console.log('Gemini Live v1.7.21 semantic grounded-search policy: OK');
           NODE
 
       - name: Nutrition evidence precedence
@@ -68,15 +71,16 @@ jobs:
           const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
           assert.equal(chooseNutritionMode({...db,nutritionEvidence:estimate}).mode,'trusted-db');
           const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:7,f:25.2,c:66,kcal:517,servingLabel:'Lサイズ',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/'});
+          assert.equal(chooseNutritionMode({...db,nutritionEvidence:official}).mode,'evidence');
           const unknown={name:'マックフライポテト',foodId:null,unresolved:true,needsSkin:false,needsAmount:false,amount:null,meal:'昼',nutritionEvidence:official};
           assert.equal(chooseNutritionMode(unknown).mode,'evidence');
           const record=buildEvidenceRecord(unknown,123);
           assert.equal(record.Cal,517);
           assert.equal(record._clean.nutritionSource,'official-web');
-          console.log('Nutrition evidence precedence including official-web: OK');
+          console.log('Official/user evidence outranks generic DB; AI estimate does not: OK');
           NODE
 
-      - name: Draft standard amount, official web, AI fallback and user-label flow
+      - name: Draft standard amount, official web and user-label flow
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -104,6 +108,18 @@ jobs:
           console.log('Draft resolution scenarios: OK');
           NODE
 
+      - name: Candidate-aware official lookup cache
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
+          const {nutritionLookupCacheKey}=await import('./clean/src/live/nutrition-lookup-v1720.js');
+          const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
+          const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
+          assert.notEqual(a,b);
+          console.log('Candidate-aware cache key: OK');
+          NODE
+
       - name: Runtime wiring and UI transparency
         run: |
           node --input-type=module <<'NODE'
@@ -112,19 +128,20 @@ jobs:
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.20/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.21/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.16/);
-          assert.match(live,/lookupOfficialNutrition/);
+          assert.match(live,/config-v1720\.js\?v=1\.7\.21/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.21/);
+          assert.match(live,/ユーザー発話:/);
+          assert.match(live,/candidateNames:candidates/);
           assert.match(live,/nutritionSource:'official-web'/);
-          assert.match(live,/startOfficialLookups/);
           assert.match(live,/buildEvidenceRecord/);
-          assert.match(live,/itemNutritionLine/);
           assert.match(ui,/日本食品標準成分表/);
           assert.match(ui,/record-source-badge/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.20/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.20/);
+            assert.match(html,/v1\.7\.21/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.21/);
           }
-          console.log('v1.7.20 runtime wiring/UI transparency: OK');
+          console.log('v1.7.21 runtime wiring/UI transparency: OK');
           NODE
