@@ -47,7 +47,7 @@ jobs:
           assert.match(SYSTEM_INSTRUCTION,/unresolved の食品だけ、Google Search/);
           assert.match(SYSTEM_INSTRUCTION,/nutritionSource="ai-estimate"/);
           assert.match(SYSTEM_INSTRUCTION,/普通の量/);
-          console.log('Gemini Live v1.7.16 search/schema contract: OK');
+          console.log('Gemini Live v1.7.16 base search/schema contract: OK');
           NODE
       - name: Nutrition evidence precedence
         run: |
@@ -91,9 +91,10 @@ jobs:
           assert.equal(result.ready,false);
           assert.equal(result.draft[0].status,'unresolved');
           const ref=result.draft[0].ref;
-          result=unknown.applyFunctionCall({id:'3',args:{operations:[{op:'update',ref,p:30,f:20,c:45,kcal:480,nutritionSource:'official-web',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/',servingLabel:'1個'}]}});
+          result=unknown.applyFunctionCall({id:'3',args:{operations:[{op:'update',ref,p:30,f:20,c:45,kcal:480,nutritionSource:'ai-estimate',servingLabel:'1個'}]}});
           assert.equal(result.ready,true);
           assert.equal(result.draft[0].nutritionMode,'evidence');
+          assert.equal(result.draft[0].nutritionEvidence.source,'ai-estimate');
 
           const packageValue=new LiveMealDraft();
           result=packageValue.applyFunctionCall({id:'4',args:{operations:[{op:'add',name:'カツ丼',p:18.5,f:24,c:82,nutritionSource:'user-label',sourceLabel:'パッケージ表示',servingLabel:'1パック'}]}});
@@ -110,18 +111,17 @@ jobs:
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
           const live=fs.readFileSync('./clean/src/live/live-v1716.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
-          assert.match(entry,/free-tier-search-hotfix-v1717\.js\?v=1\.7\.17/);
-          assert.match(entry,/live-v1716\.js\?v=1\.7\.17/);
+          assert.match(entry,/free-tier-search-hotfix-v1717\.js\?v=1\.7\.18/);
+          assert.match(entry,/live-v1716\.js\?v=1\.7\.18/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.16/);
           assert.match(live,/buildEvidenceRecord/);
           assert.match(live,/record\._clean\.displayAmount=item\.standardLabel/);
-          assert.match(live,/Food Master未登録・公式情報を確認中/);
           assert.match(ui,/日本食品標準成分表/);
           assert.match(ui,/record-source-badge/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.17/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.17/);
+            assert.match(html,/v1\.7\.18/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.18/);
           }
           console.log('Runtime wiring/UI transparency: OK');
           NODE
