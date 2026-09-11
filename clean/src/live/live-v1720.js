@@ -1,14 +1,14 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { buildEvidenceRecord, chooseNutritionMode, evidenceSourceText } from '../nutrition/evidence-v1716.js?v=1.7.21';
-import { LIVE_VERSION } from './config-v1720.js?v=1.7.21';
-import { LiveMealDraft } from './draft-v1716.js?v=1.7.16';
-import { GeminiLiveTransport } from './transport-v1720.js?v=1.7.21';
+import { buildEvidenceRecord, chooseNutritionMode, evidenceSourceText } from '../nutrition/evidence-v1716.js?v=1.7.24';
+import { LIVE_VERSION } from './config-v1720.js?v=1.7.24';
+import { LiveMealDraft } from './draft-v1716.js?v=1.7.24';
+import { GeminiLiveTransport } from './transport-v1720.js?v=1.7.24';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
 import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.12';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
-import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.21';
-import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL, isLookupDebugEnabled, getLookupDiagnostics, formatLookupDiagnosticsText, clearLookupDiagnostics, setLookupDiagnosticListener } from './nutrition-lookup-v1720.js?v=1.7.23';
+import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.24';
+import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL, isLookupDebugEnabled, getLookupDiagnostics, formatLookupDiagnosticsText, clearLookupDiagnostics, setLookupDiagnosticListener } from './nutrition-lookup-v1720.js?v=1.7.24';
 
 const draft=new LiveMealDraft();
 const LIVE_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('liveDebug')==='1';
@@ -95,7 +95,7 @@ function handleLiveTrace(event={}){
 function loadCss(){
   if(document.getElementById('pfc-live-v1721-css'))return;
   const link=document.createElement('link');link.id='pfc-live-v1721-css';link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.21',import.meta.url).href;document.head.appendChild(link);
+  link.href=new URL('../../assets/live-v170.css?v=1.7.24',import.meta.url).href;document.head.appendChild(link);
 }
 function ensureModal(){
   if(modal)return modal;
@@ -103,6 +103,13 @@ function ensureModal(){
   modal.innerHTML='<div class="modal-sheet pfc-live-sheet" id="pfc-live-sheet"></div>';document.body.appendChild(modal);return modal;
 }
 function lookupState(item){return item?.ref?lookupStates.get(item.ref)||null:null}
+function lookupFingerprint(item={}){
+  return JSON.stringify([
+    String(item.ref||''),String(item.name||''),String(item.canonicalName||''),
+    Number(item.amount)||0,String(item.unit||''),String(item.variant||''),
+    ...(Array.isArray(item.candidateNames)?item.candidateNames.map(x=>String(x||'')):[])
+  ]);
+}
 function itemStatus(item){
   const mode=chooseNutritionMode(item);
   if(mode.mode==='evidence'){
@@ -111,7 +118,9 @@ function itemStatus(item){
   }
   const ls=lookupState(item);
   if(item.unresolved&&ls?.status==='searching')return `公式情報を検索中（${NUTRITION_LOOKUP_MODEL}）`;
+  if(item.unresolved&&ls?.status==='not_found'&&ls?.result?.errorCode==='OFFICIAL_URL_404')return '公式ページを再探索したが確定できず・商品候補を確認中';
   if(item.unresolved&&ls?.status==='not_found')return '公式情報を確定できず・商品候補を確認中';
+  if(item.unresolved&&ls?.status==='error'&&/timed out|timeout/i.test(String(ls?.message||'')))return '公式検索がタイムアウト・商品候補を確認中';
   if(item.unresolved&&ls?.status==='error')return '公式検索エラー・商品候補を確認中';
   if(item.needsSkin&&item.needsAmount)return '皮あり・皮なしと量を確認します';
   if(item.needsSkin)return '皮あり・皮なしを確認します';
@@ -223,13 +232,18 @@ function startOfficialLookups(items=draft.snapshot()){
   return started;
 }
 async function resolveOfficialItem(item){
-  const ref=item.ref;const originalName=item.name;lookupStates.set(ref,{status:'searching',name:originalName});addTrace(`official-search ${originalName}`);render();
+  const ref=item.ref;const originalName=item.name;const fingerprint=lookupFingerprint(item);
+  lookupStates.set(ref,{status:'searching',name:originalName,fingerprint});addTrace(`official-search ${originalName}`);render();
   try{
     const candidates=[originalName,item.canonicalName,...(item.candidateNames||[])].map(x=>String(x||'').trim()).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i).slice(0,5);
     const contextText=[lastUser?`ユーザー発話: ${lastUser}`:'',item.canonicalName?`カード候補: ${item.canonicalName}`:''].filter(Boolean).join(' / ');
     const result=await lookupOfficialNutrition({foodName:originalName,contextText,candidateNames:candidates});
     const current=draft.snapshot().find(x=>x.ref===ref);
-    if(!current||current.name!==originalName||!current.unresolved||current.nutritionEvidence)return;
+    if(!current||lookupFingerprint(current)!==fingerprint||!current.unresolved||current.nutritionEvidence){
+      lookupStates.delete(ref);addTrace(`official-stale ${originalName}`);render();
+      if(current?.unresolved&&!current?.nutritionEvidence)startOfficialLookups(draft.snapshot());
+      return;
+    }
     if(result?.status==='verified'){
       draft.applyFunctionCall({id:`official-${Date.now()}-${ref}`,args:{operations:[{
         op:'update',ref,
@@ -238,14 +252,13 @@ async function resolveOfficialItem(item){
         nutritionSource:'official-web',sourceLabel:result.sourceLabel,sourceUrl:result.sourceUrl,servingLabel:result.servingLabel
       }]}});
       lookupStates.set(ref,{status:'verified',result});addTrace(`official-hit ${result.sourceDomain||result.sourceLabel}${result.cacheHit?' cache':''}`);render();
-      if(draft.isReady()){
-        const updated=draft.snapshot().find(x=>x.ref===ref);if(updated)transport?.sendText(buildOfficialResolvedMessage({item:updated}));
-      }
+      const updated=draft.snapshot().find(x=>x.ref===ref);
+      if(updated)transport?.sendText(buildOfficialResolvedMessage({item:updated,ready:draft.isReady()}));
       return;
     }
-    lookupStates.set(ref,{status:'not_found',result});addTrace(`official-not-found ${originalName}`);render();scheduleTurnRecovery(40);
+    lookupStates.set(ref,{status:'not_found',result});addTrace(`official-not-found ${originalName}${result?.errorCode?` ${result.errorCode}`:''}`);render();scheduleTurnRecovery(40);
   }catch(e){
-    lookupStates.set(ref,{status:'error',message:String(e?.message||e)});addTrace(`official-error ${String(e?.message||e)}`);render();scheduleTurnRecovery(40);
+    lookupStates.set(ref,{status:'error',message:String(e?.message||e),errorCode:String(e?.lookupCode||'')});addTrace(`official-error ${String(e?.lookupCode||'')} ${String(e?.message||e)}`.trim());render();scheduleTurnRecovery(40);
   }
 }
 function recoverCurrentTurn(){
@@ -264,11 +277,23 @@ function recoverCurrentTurn(){
   recoveryAttempts+=1;const msg=buildInternalRecoveryMessage({userText,items,attempt:recoveryAttempts});addTrace(`fallback-recovery #${recoveryAttempts}`);
   try{transport.sendText(msg)}catch(e){addTrace(`recovery-send-error ${String(e?.message||e)}`)}
 }
+function resetLookupStateForChangedItems(beforeItems=[],afterItems=[]){
+  const before=new Map((beforeItems||[]).map(x=>[x.ref,lookupFingerprint(x)]));
+  for(const item of afterItems||[]){
+    const prev=before.get(item.ref);if(!prev)continue;
+    if(prev!==lookupFingerprint(item)&&lookupStates.has(item.ref)){
+      lookupStates.delete(item.ref);addTrace(`official-reset ${item.name||item.ref}`);
+    }
+  }
+}
 async function handleToolCalls(calls){
   const responses=[];toolCallsInTurn+=Array.isArray(calls)?calls.length:0;
   for(const call of calls){
     if(call?.name!=='update_meal_draft'){responses.push({id:call?.id,name:call?.name||'unknown',response:{result:{ok:false,error:'unsupported_tool'}}});continue}
-    try{const result=draft.applyFunctionCall(call);responses.push({id:call.id,name:call.name,response:{result}})}
+    const before=draft.snapshot();
+    try{
+      const result=draft.applyFunctionCall(call);resetLookupStateForChangedItems(before,draft.snapshot());responses.push({id:call.id,name:call.name,response:{result}})
+    }
     catch(e){responses.push({id:call?.id,name:call?.name||'update_meal_draft',response:{result:{ok:false,error:String(e?.message||e),draft:draft.toolResult().draft}}})}
   }
   render();transport?.sendToolResponses(responses);startOfficialLookups(draft.snapshot());
