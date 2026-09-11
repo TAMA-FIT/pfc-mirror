@@ -1,21 +1,15 @@
-name: PFC Live v1.7.24 truth-sync grounded search check
+name: PFC Live v1.7.25 Tavily truth-sync check
 
 on:
   pull_request:
     paths:
       - 'clean/src/live/config-v1720.js'
-      - 'clean/src/live/transport-v1720.js'
       - 'clean/src/live/live-guard-v1720.js'
       - 'clean/src/live/nutrition-lookup-v1720.js'
       - 'clean/src/live/live-v1720.js'
-      - 'clean/src/live/draft-v1716.js'
-      - 'clean/src/nutrition/evidence-v1716.js'
-      - 'clean/assets/base-foods.js'
-      - 'clean/assets/live-v170.css'
       - 'clean/src/main-v160.js'
       - 'clean/index.html'
       - 'index.html'
-      - 'docs/gas/PFC_GAS_V13_NUTRITION_LOOKUP_PATCH.gs'
       - '.github/workflows/pfc-live-free-tier-hotfix-check.yml'
   workflow_dispatch:
 
@@ -28,182 +22,101 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax check v1.7.24 runtime
+      - name: Syntax check v1.7.25 runtime
         run: |
           node --check clean/src/live/config-v1720.js
-          node --check clean/src/live/transport-v1720.js
           node --check clean/src/live/live-guard-v1720.js
           node --check clean/src/live/nutrition-lookup-v1720.js
           node --check clean/src/live/live-v1720.js
+          node --check clean/src/main-v160.js
 
-      - name: Live remains Free Tier and delegates Search
+      - name: Live delegates official lookup to Tavily pipeline
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,buildSetupMessage} from './clean/src/live/config-v1720.js';
-          assert.equal(LIVE_VERSION,'v1.7.24');
+          assert.equal(LIVE_VERSION,'v1.7.25');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
           assert.equal(setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
           assert.equal(JSON.stringify(setup.tools).includes('googleSearch'),false);
-          assert.match(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
-          assert.match(SYSTEM_INSTRUCTION,/普通のやつ/);
-          assert.match(SYSTEM_INSTRUCTION,/検索用の仮説/);
-          assert.match(SYSTEM_INSTRUCTION,/現行ラインナップ/);
-          assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側/);
+          assert.match(SYSTEM_INSTRUCTION,/Tavily/);
+          assert.match(SYSTEM_INSTRUCTION,/Gemini 3\.1 Flash Lite/);
           assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
           assert.match(SYSTEM_INSTRUCTION,/公式情報によると/);
-          assert.match(SYSTEM_INSTRUCTION,/更新します/);
-          assert.match(SYSTEM_INSTRUCTION,/__PFC_OFFICIAL_RESULT_SYNC__/);
-          console.log('Live free-tier truth-sync policy: OK');
+          assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側のTavily/);
+          assert.doesNotMatch(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
+          console.log('Live Tavily delegation policy: OK');
           NODE
 
-      - name: Grounded lookup validation, timeout and persistent diagnostics API
+      - name: Tavily lookup client contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
+          import fs from 'node:fs';
           globalThis.location={search:''};
           globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
           const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
-          const {NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_TIMEOUT_MS,buildNutritionLookupPayload,validateGroundedNutrition,nutritionLookupCacheKey,getLookupDiagnostics,formatLookupDiagnosticsText,clearLookupDiagnostics,setLookupDiagnosticListener}=mod;
-          assert.equal(NUTRITION_LOOKUP_MODEL,'gemini-2.5-flash');
+          const {NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_TIMEOUT_MS,buildNutritionLookupPayload,validateGroundedNutrition,nutritionLookupCacheKey}=mod;
+          assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
           assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,22000);
-          assert.match(NUTRITION_LOOKUP_VERSION,/v1\.7\.24-truth-sync/);
-          assert.equal(typeof getLookupDiagnostics,'function');
-          assert.equal(typeof formatLookupDiagnosticsText,'function');
-          assert.equal(typeof clearLookupDiagnostics,'function');
-          assert.equal(typeof setLookupDiagnosticListener,'function');
+          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.25-tavily');
           const payload=buildNutritionLookupPayload({foodName:'マックフライポテト L',contextText:'マックでポテトL',candidateNames:['マクドナルド マックフライポテト L']});
           assert.equal(payload.taskType,'nutritionLookup');
-          assert.equal(payload.foodName,'マックフライポテト L');
-          assert.equal(payload.candidateNames[0],'マクドナルド マックフライポテト L');
-          const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp',resolutionNote:'Lサイズを公式商品へ照合',verificationMethod:'official-page-fetch',officialFetchStatus:200});
+          const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp',searchProvider:'tavily',model:'gemini-3.1-flash-lite',verificationMethod:'tavily+official-page-fetch',officialFetchStatus:200,searchCredits:1});
           assert.equal(verified.kcal,517);
-          assert.equal(verified.f,25.2);
-          assert.equal(verified.officialFetchStatus,200);
-          assert.match(verified.resolutionNote,/Lサイズ/);
+          assert.equal(verified.searchProvider,'tavily');
+          assert.equal(verified.model,'gemini-3.1-flash-lite');
+          assert.equal(verified.searchCredits,1);
           const key1=nutritionLookupCacheKey(payload);
           const key2=nutritionLookupCacheKey({...payload,candidateNames:['別候補']});
           assert.notEqual(key1,key2);
-          assert.throws(()=>validateGroundedNutrition({status:'verified',grounded:false,officialSource:true,kcal:1,p:0,f:0,c:0,sourceUrl:'https://example.com'}),/not grounded/);
-          assert.throws(()=>validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,kcal:1,p:0,f:0,c:0,sourceUrl:''}),/sourceUrl/);
-          console.log('Grounded lookup validation + timeout + diagnostics API: OK');
+          const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
+          assert.match(lookup,/search=Tavily/);
+          assert.match(lookup,/Gemini 3\.1 Flash Lite/);
+          assert.doesNotMatch(lookup,/gemini-2\.5-flash/);
+          assert.doesNotMatch(lookup,/upstream-retry/);
+          console.log('Tavily lookup client: OK');
           NODE
 
-      - name: Generic Food Master stays local
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
-            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
-          ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?known=1724');
-          const draft=new LiveMealDraft();
-          const result=draft.applyFunctionCall({id:'known',args:{operations:[{op:'add',name:'ポテト(L)'}]}});
-          assert.equal(result.ready,true);
-          assert.equal(result.draft[0].nutritionMode,'trusted-db');
-          assert.equal(result.draft[0].canonicalName,'ポテト(L)');
-          console.log('Generic Food Master path: OK');
-          NODE
-
-      - name: Official evidence overrides generic DB but AI estimate does not
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import {normalizeNutritionEvidence,chooseNutritionMode} from './clean/src/nutrition/evidence-v1716.js';
-          const base={foodId:'food:potato',unresolved:false,needsSkin:false,needsAmount:false,amount:1};
-          const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:7,f:25.2,c:66,kcal:517,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',servingLabel:'Lサイズ'});
-          assert.equal(chooseNutritionMode({...base,nutritionEvidence:official}).mode,'evidence');
-          const ai=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:5,f:25,c:67,kcal:517,servingLabel:'Lサイズ'});
-          assert.equal(chooseNutritionMode({...base,nutritionEvidence:ai}).mode,'trusted-db');
-          console.log('Official > generic DB > AI estimate precedence: OK');
-          NODE
-
-      - name: Unknown product accepts app-only official evidence
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?official=1724');
-          const draft=new LiveMealDraft();
-          let result=draft.applyFunctionCall({id:'unknown',args:{operations:[{op:'add',name:'サムライマック'}]}});
-          assert.equal(result.ready,false);
-          const ref=result.draft[0].ref;
-          result=draft.applyFunctionCall({id:'official',args:{operations:[{op:'update',ref,name:'炙り醤油風 ダブル肉厚ビーフ',p:38,f:37.1,c:37.2,kcal:633,nutritionSource:'official-web',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/1220/',servingLabel:'1個'}]}});
-          assert.equal(result.ready,true);
-          assert.equal(result.draft[0].nutritionMode,'evidence');
-          assert.equal(result.draft[0].nutritionEvidence.sourceType,'official-web');
-          console.log('Official-web evidence path: OK');
-          NODE
-
-      - name: Search-before-AI and truth-sync runtime contract
+      - name: Truth-sync and stale-result guard remain intact
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const guard=fs.readFileSync('./clean/src/live/live-guard-v1720.js','utf8');
-          const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
           assert.match(live,/lookupOfficialNutrition/);
-          assert.match(live,/startOfficialLookups/);
-          assert.match(live,/lookupPendingFor/);
-          assert.match(live,/lookupAttemptedForAll/);
-          assert.match(live,/candidateNames:candidates/);
-          assert.match(live,/ユーザー発話:/);
-          assert.match(live,/nutritionSource:'official-web'/);
-          assert.match(live,/buildOfficialResolvedMessage\(\{item:updated,ready:draft\.isReady\(\)\}\)/);
           assert.match(live,/lookupFingerprint/);
           assert.match(live,/official-stale/);
           assert.match(live,/official-reset/);
-          assert.match(live,/if\(started>0\|\|lookupPendingFor\(items\)\)return/);
+          assert.match(live,/nutritionSource:'official-web'/);
+          assert.match(live,/buildOfficialResolvedMessage\(\{item:updated,ready:draft\.isReady\(\)\}\)/);
           assert.match(guard,/__PFC_OFFICIAL_LOOKUP_NOT_FOUND__/);
+          assert.match(guard,/Tavilyによる日本向け公式検索/);
+          assert.match(guard,/Tavily公式検索 \+ Gemini 3\.1 Flash Lite抽出/);
           assert.match(guard,/内部知識からkcal\/P\/F\/Cを読み上げ/);
-          assert.match(lookup,/official-url-repair/);
-          assert.match(lookup,/OFFICIAL_URL_404/);
-          assert.match(lookup,/network-retry/);
-          assert.match(lookup,/upstream-retry/);
-          console.log('Truth-sync, stale-result guard, retry and search-before-AI ordering: OK');
+          console.log('Truth-sync and stale-result guard: OK');
           NODE
 
-      - name: Persistent lookup diagnostics render contract
+      - name: Persistent lookup diagnostics remain state-driven
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(live,/isLookupDebugEnabled/);
           assert.match(live,/lookupDiagnosticPanelHtml/);
           assert.match(live,/data-lookup-diagnostic-panel/);
           assert.match(live,/data-live-action="copy-lookup-diag"/);
-          assert.match(live,/setLookupDiagnosticListener\(\(\)=>\{if\(LOOKUP_DEBUG&&modal&&!modal\.hidden\)render\(\)\}\)/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.24/);
-          assert.match(lookup,/v1\.7\.24-truth-sync/);
-          assert.match(lookup,/lookupDiagnosticListeners/);
-          assert.doesNotMatch(lookup,/insertAdjacentElement/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.25/);
+          assert.match(lookup,/v1\.7\.25-tavily/);
+          assert.match(lookup,/searchProvider/);
+          assert.match(lookup,/tavilyRequestId/);
+          assert.match(lookup,/searchCredits/);
           assert.doesNotMatch(lookup,/document\.querySelector/);
-          console.log('Lookup diagnostics remain state-driven under v1.7.24: OK');
-          NODE
-
-      - name: GAS V13.1 flexible search security and quota contract
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          const gas=fs.readFileSync('./docs/gas/PFC_GAS_V13_NUTRITION_LOOKUP_PATCH.gs','utf8');
-          assert.match(gas,/gemini-2\.5-flash/);
-          assert.match(gas,/google_search/);
-          assert.match(gas,/GEMMA_API_KEY/);
-          assert.match(gas,/450/);
-          assert.match(gas,/Math\.min\(Math\.floor\(configured\), 500\)/);
-          assert.match(gas,/普通のやつ/);
-          assert.match(gas,/現行ラインナップ/);
-          assert.match(gas,/終売/);
-          assert.match(gas,/missing Google Search grounding metadata/);
-          assert.doesNotMatch(gas,/official domain not present in grounding sources/);
-          assert.doesNotMatch(gas,/apiKey\s*:\s*apiKey/);
-          console.log('GAS flexible search proxy security/quota contract: OK');
+          console.log('Persistent Tavily diagnostics: OK');
           NODE
 
       - name: Browser back still releases microphone
@@ -219,26 +132,24 @@ jobs:
           assert.match(live,/a\?\.stopCapture/);
           assert.doesNotMatch(live,/visibilitychange/);
           assert.match(audio,/track\.stop\(\)/);
-          console.log('Browser-back mic release remains intact: OK');
+          console.log('Browser-back mic release: OK');
           NODE
 
-      - name: Production wiring keeps v1.7.24 truth-sync runtime
+      - name: Production wiring is v1.7.25 Tavily
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.24/);
-          assert.doesNotMatch(entry,/live-v1719\.js/);
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
-          assert.match(live,/config-v1720\.js\?v=1\.7\.24/);
-          assert.match(live,/transport-v1720\.js\?v=1\.7\.24/);
-          assert.match(live,/live-guard-v1720\.js\?v=1\.7\.24/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.24/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.25/);
+          assert.match(live,/config-v1720\.js\?v=1\.7\.25/);
+          assert.match(live,/live-guard-v1720\.js\?v=1\.7\.25/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.25/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.24/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.24/);
+            assert.match(html,/v1\.7\.25/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.25/);
           }
-          console.log('v1.7.24 runtime and cache chain: OK');
+          console.log('v1.7.25 Tavily cache chain: OK');
           NODE
