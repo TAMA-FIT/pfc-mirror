@@ -65,7 +65,8 @@ jobs:
           assert.equal(record.Cal,517);
           assert.equal(record._clean.nutritionSource,'official-web');
           const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
-          assert.equal(chooseNutritionMode({...unknown,foodId:'food:1',unresolved:false,nutritionEvidence:estimate}).mode,'trusted-db');
+          const db={foodId:'food:1',unresolved:false,needsSkin:false,needsAmount:false,amount:1,unit:'個',meal:'昼',nutritionEvidence:estimate};
+          assert.equal(chooseNutritionMode(db).mode,'trusted-db');
           console.log('Official evidence precedence: OK');
           NODE
 
