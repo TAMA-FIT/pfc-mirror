@@ -9,6 +9,7 @@ on:
       - 'clean/src/live/live-v1719.js'
       - 'clean/src/live/draft-v1716.js'
       - 'clean/src/nutrition/evidence-v1716.js'
+      - 'clean/assets/base-foods.js'
       - 'clean/assets/live-v170.css'
       - 'clean/src/main-v160.js'
       - 'clean/index.html'
@@ -51,61 +52,87 @@ jobs:
           console.log('Native free-tier setup: OK');
           NODE
 
-      - name: End-to-end turn recovery contract
+      - name: App-side card guard contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          import vm from 'node:vm';
-          import {
-            normalizeProvisionalFoodName,
-            shouldRecoverTurn,
-            buildInternalRecoveryMessage,
-            evidenceMacroLine
-          } from './clean/src/live/live-guard-v1719.js';
-
+          import {normalizeProvisionalFoodName,shouldRecoverTurn} from './clean/src/live/live-guard-v1719.js';
           assert.equal(normalizeProvisionalFoodName('ポテト（L）'),'ポテト(L)');
           assert.equal(normalizeProvisionalFoodName('サムライマック食べた'),'サムライマック');
           assert.equal(normalizeProvisionalFoodName('普通のやつ'),'');
           assert.equal(shouldRecoverTurn({userText:'ポテト（L）',items:[],ready:false}),true);
           assert.equal(shouldRecoverTurn({userText:'普通のやつ',items:[],ready:false}),false);
+          const base=fs.readFileSync('./clean/assets/base-foods.js','utf8');
+          assert.match(base,/"ポテト\(L\)"/);
+          console.log('Transcript -> provisional card guard + actual Food Master row: OK');
+          NODE
 
-          const baseCode=fs.readFileSync('./clean/assets/base-foods.js','utf8')
-            .replace(/^const DB\s*=\s*/, 'globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__ = ');
-          vm.runInThisContext(baseCode);
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?e2e=1719');
-
-          // Exact real-device failure mode: model replies verbally but never calls the tool.
-          // App-side guard creates a provisional card, so the memo cannot remain empty forever.
-          const potato=new LiveMealDraft();
-          let result=potato.applyFunctionCall({id:'local-card',args:{operations:[{op:'add',name:normalizeProvisionalFoodName('ポテト（L）')}]}});
+      - name: No-tool-call to trusted Food Master ready flow
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {normalizeProvisionalFoodName} from './clean/src/live/live-guard-v1719.js';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
+            ['🍔ジャンク・菓子','ポテト(S)','ぽてと マック まっく いも 芋','1個',3,11,28,225],
+            ['🍔ジャンク・菓子','ポテト(M)','ぽてと マック まっく いも 芋','1個',5,20,50,410],
+            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
+          ];
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?known=1719');
+          const draft=new LiveMealDraft();
+          const result=draft.applyFunctionCall({id:'local-card',args:{operations:[{
+            op:'add',name:normalizeProvisionalFoodName('ポテト（L）')
+          }]}});
           assert.equal(result.draft.length,1);
-          const ref=result.draft[0].ref;
-
-          if(!result.ready){
-            assert.equal(shouldRecoverTurn({userText:'ポテト（L）',items:result.draft,ready:false}),true);
-            const internal=buildInternalRecoveryMessage({userText:'ポテト（L）',items:result.draft,attempt:1});
-            assert.match(internal,/ai-estimate/);
-            assert.match(internal,/ready=true/);
-            result=potato.applyFunctionCall({id:'ai-estimate',args:{operations:[{
-              op:'update',ref,p:5.4,f:23,c:55,kcal:454,nutritionSource:'ai-estimate',servingLabel:'Lサイズ1個'
-            }]}});
-          }
+          assert.equal(result.draft[0].canonicalName,'ポテト(L)');
+          assert.equal(result.draft[0].nutritionMode,'trusted-db');
           assert.equal(result.ready,true);
-          const item=result.draft[0];
-          if(item.nutritionEvidence){
-            assert.match(evidenceMacroLine(item),/P 5\.4g/);
-            assert.match(evidenceMacroLine(item),/F 23g/);
-            assert.match(evidenceMacroLine(item),/C 55g/);
-          }
+          console.log('Model skipped tool -> app card -> Food Master -> ready=true: OK');
+          NODE
 
-          const unknown=new LiveMealDraft();
-          result=unknown.applyFunctionCall({id:'label',args:{operations:[{
+      - name: Truly unknown food recovers to AI estimate
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {shouldRecoverTurn,buildInternalRecoveryMessage,evidenceMacroLine} from './clean/src/live/live-guard-v1719.js';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
+            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
+          ];
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?unknown=1719');
+          const draft=new LiveMealDraft();
+          let result=draft.applyFunctionCall({id:'unknown-card',args:{operations:[{op:'add',name:'サムライマック'}]}});
+          assert.equal(result.draft.length,1);
+          assert.equal(result.ready,false);
+          assert.equal(result.draft[0].status,'unresolved');
+          assert.equal(shouldRecoverTurn({userText:'サムライマック',items:result.draft,ready:false}),true);
+          const internal=buildInternalRecoveryMessage({userText:'サムライマック',items:result.draft,attempt:1});
+          assert.match(internal,/ai-estimate/);
+          assert.match(internal,/ready=true/);
+          const ref=result.draft[0].ref;
+          result=draft.applyFunctionCall({id:'estimate',args:{operations:[{
+            op:'update',ref,p:30,f:20,c:45,kcal:480,nutritionSource:'ai-estimate',servingLabel:'1個'
+          }]}});
+          assert.equal(result.ready,true);
+          assert.equal(result.draft[0].nutritionMode,'evidence');
+          assert.match(evidenceMacroLine(result.draft[0]),/480 kcal/);
+          assert.match(evidenceMacroLine(result.draft[0]),/P 30g/);
+          console.log('Unresolved -> internal recovery -> AI estimate -> ready=true: OK');
+          NODE
+
+      - name: User-declared package PFC reaches ready
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?label=1719');
+          const draft=new LiveMealDraft();
+          const result=draft.applyFunctionCall({id:'label',args:{operations:[{
             op:'add',name:'新商品カツ丼',p:18.5,f:24,c:82,nutritionSource:'user-label',servingLabel:'1パック'
           }]}});
           assert.equal(result.ready,true);
+          assert.equal(result.draft[0].nutritionMode,'evidence');
           assert.equal(result.draft[0].nutritionEvidence.kcal,618);
-          console.log('Speech -> card -> evidence -> ready flow: OK');
+          console.log('User-label PFC -> derived kcal -> ready=true: OK');
           NODE
 
       - name: Card preview and registration gate contract
