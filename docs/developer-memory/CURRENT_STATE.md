@@ -6,14 +6,14 @@ Last memory refresh: 2026-09-11 JST
 
 Fresh GitHub `main` is always canonical for code/version state. This file records intent, verified milestones, unresolved defects, and handoff context. If this file and Fresh `main` disagree about code or version, Fresh `main` wins.
 
-## Runtime state before the current v1.7.8 candidate
+## Current runtime / candidate
 
-- Production app version: **v1.7.7**
-- Production `main` commit before the current branch: `b751ab913b134432351295c25ca42a3657f1f1df`
+- Production app before this candidate: **v1.7.8**
+- Production `main` before the v1.7.9 branch: `c31a187648f330608d23a530ef5d4624ba4e1ee4`
+- Current candidate branch: `fix/v179-live-pcm-jitter-diagnostic`
+- Intended next public version: **v1.7.9**
 - Public URL: `https://tama-fit.github.io/pfc-mirror/`
 - Root `index.html` is an active runtime entrypoint and must be updated together with `clean/index.html` when version/cache markers change.
-- Current integration branch at this memory refresh: `feat/v178-transcribe-live-diagnostics`
-- Intended next public version after merge: **v1.7.8**
 
 ## Gemini Live production status
 
@@ -32,29 +32,11 @@ Android Chrome real-device testing has verified this sequence end-to-end:
 9. `update_meal_draft` Function Calling updates food cards.
 10. Existing deterministic Food Resolver / Food Master / nutrition engine remains authoritative.
 
-Real-device draft examples have included chicken breast with clarified skin state and quantity, and natto with an assumed standard pack. The user reports the actual voice conversation is now generally good.
+The user reports the actual voice conversation quality is now generally good.
 
-## Remaining real-device issues after v1.7.7
+## Dedicated display transcription — device verified
 
-### 1. Mechanical buzzer/tone during model audio
-
-The user still hears an obviously mechanical buzzer/tone several times during Live use, even after v1.7.7 added a small PCM playback jitter buffer.
-
-Do not assume this is a network warning sound. There is no intentional app-side buzzer generator in the runtime. A current public Google issue also reports native Live audio degenerating into sustained non-speech tones, so server-originated malformed audio remains plausible.
-
-The next candidate therefore adds event tracing around model audio, Function Calling, interruption, turn completion, WebSocket close/error, and suspicious audio-arrival gaps. This is diagnostic instrumentation, not proof that the buzzer is fixed.
-
-### 2. Live agent input transcription is inaccurate
-
-The Live conversational model often understands the user semantically even when its `inputTranscription` display is poor. A real-device screenshot showed clearly wrong displayed text including Korean-looking characters while Gemini still understood the meal and updated the draft correctly.
-
-Therefore semantic conversation and user-visible transcription are now treated as separate responsibilities.
-
-## v1.7.8 candidate: dedicated display transcription
-
-The candidate keeps the conversational agent unchanged and adds a second parallel Live transcription session only for the visible `あなた` transcript.
-
-Architecture:
+v1.7.8 split visible user transcription away from the conversational Live model:
 
 ```text
 same microphone PCM 16 kHz
@@ -65,47 +47,82 @@ same microphone PCM 16 kHz
        -> visible Japanese user transcript only
 ```
 
-Officially verified transcription endpoint/model:
+Current transcription configuration:
 
 - model: `gemini-3.5-transcribe-live`
 - response modality: `TEXT`
-- language hint: `ja-JP`
+- language: `ja-JP`
 - mode: `SMART`
-- custom vocabulary: a small PFC/food-oriented list such as `鶏胸肉`, `納豆`, `白米`, `MCTオイル`, etc.
-- raw input: 16-bit PCM at 16 kHz mono
-- Live Transcribe continuous session limit currently documented as 10 minutes
+- small PFC/food custom vocabulary
 
-Implementation behavior:
+Real-device v1.7.8 testing showed a clear improvement. A phrase equivalent to `鶏むねと米と納豆。` displayed correctly while the Live conversational agent also interpreted it correctly.
 
-- obtain a **second** ephemeral token from the same existing GAS V12 endpoint; GAS itself is unchanged
-- connect a separate `BidiGenerateContentConstrained` WebSocket for `gemini-3.5-transcribe-live`
-- send the same captured PCM bytes to both sockets
-- use finalized `inputTranscription` from the dedicated transcriber for the displayed user text
-- ignore the conversational agent's poorer input transcription while the dedicated transcriber is healthy
-- if the dedicated transcriber fails or closes, keep the voice conversation alive and fall back to the existing agent transcription rather than killing the session
-- no separate permanent API key is introduced
+The transcriber uses a second ephemeral token from the same GAS V12 endpoint. No additional permanent API key is exposed.
 
-## v1.7.8 audio diagnostic trace
+## Remaining real-device issue: mechanical buzzer / tone
 
-The candidate adds a small visible event trace in the Live sheet. It records only timing/event metadata, not raw audio and not microphone recordings.
+The user still hears an obviously mechanical buzzer/tone repeatedly during model audio.
 
-Tracked signals include:
+Important observations from v1.7.8 device tracing:
 
-- model audio burst start
-- suspicious 140–700 ms audio-arrival gaps
-- Function Call / Function Call cancellation
-- `interrupted`
-- `turnComplete`
-- WebSocket error/close/goAway
-- cumulative model-audio chunk count
+- the app has no intentional buzzer generator
+- the buzzer occurred without an `interrupted` event
+- the same model turn showed model-audio arrival gaps around **213 ms** and **154 ms**
+- tool calling and `turnComplete` still occurred normally
 
-The purpose is to correlate the user's heard buzzer with Live protocol events. If the buzzer occurs while the trace shows no gap/interruption/tool event, malformed audio coming from Gemini becomes a stronger hypothesis.
+This makes streaming playback underrun / rebuffer behavior a strong candidate, but malformed/tone-like PCM already present in Gemini output remains possible.
+
+Do not call the cause confirmed until the v1.7.9 raw-PCM replay test is done on device.
+
+## v1.7.9 candidate: true ~300 ms jitter buffer
+
+The old v1.7.7/v1.7.8 playback path scheduled incoming PCM almost immediately with only ~120 ms recovery lead. That was not a real queue and could still run dry when a 150–200+ ms arrival gap occurred.
+
+v1.7.9 changes only the Live model-audio playback path:
+
+- target buffer: ~300 ms
+- rebuffer threshold: ~60 ms of scheduled audio remaining
+- initial/recovery playback waits until ~300 ms of PCM has accumulated
+- once buffered, chunks are scheduled contiguously ahead of playback
+- if the scheduled queue runs close to empty, new PCM is accumulated again before resuming
+- short final responses below 300 ms are force-flushed at `turnComplete`
+
+This intentionally trades roughly a few tenths of a second of response latency for stability.
+
+## v1.7.9 raw PCM diagnostic replay
+
+The app now retains the exact Gemini model PCM chunks for the last completed model turn in memory only.
+
+A diagnostic button appears:
+
+`PCM診断：直前AI音声を一括再生`
+
+Behavior:
+
+- same-rate PCM chunks are concatenated into one continuous local `AudioBuffer`
+- network arrival timing and normal chunk-by-chunk streaming scheduling are removed from the replay
+- microphone forwarding to both Live sockets is paused while the diagnostic replay is playing so Gemini does not hear its own replay
+- no raw PCM is uploaded or persisted by this diagnostic feature
+
+Interpretation:
+
+```text
+normal Live playback buzzes
++
+one-piece raw PCM replay is clean
+-> browser streaming / jitter scheduling remains the likely source
+
+one-piece raw PCM replay also contains the buzzer
+-> the artifact is already present in Gemini-provided PCM or in local PCM decoding itself
+```
+
+This device test is the next decisive step.
 
 ## GAS / authentication state
 
-The user manually deployed **GAS V12**. Keep it unchanged for v1.7.8.
+The user manually deployed **GAS V12**. Keep it unchanged for v1.7.9.
 
-The same Script Properties Gemini API key remains the only permanent key. The browser only receives short-lived tokens. The v1.7.8 transcriber requests its own second one-use token because one token is already consumed by the conversational Live socket.
+The same Script Properties Gemini API key remains the only permanent key. The browser only receives short-lived tokens.
 
 ## Live semantic architecture invariant
 
@@ -155,12 +172,12 @@ Do not solve the normal path by expanding regex rules. Its intended architecture
 - CI success is not device success.
 - Every public runtime change gets a visible version bump.
 
-## Immediate device test after v1.7.8 merge
+## Immediate device test after v1.7.9 merge
 
-1. Confirm visible `v1.7.8`.
-2. Start Live and confirm normal `setupComplete`.
-3. Confirm the `文字起こし` diagnostic shows `gemini-3.5-transcribe-live | ja-JP | SMART`.
-4. Speak food terms that previously mistranscribed and verify the visible `あなた` text is substantially better.
-5. Verify Gemini conversation and Function Calling/card updates remain unchanged.
-6. Listen for the buzzer and immediately note/screenshot the `音声イベント` line.
-7. If the buzzer persists, compare whether it correlates with `audio-gap`, `interrupted`, `toolCall`, or `turnComplete` before changing audio code again.
+1. Confirm visible `v1.7.9`.
+2. Start Live and confirm `setupComplete` plus dedicated `gemini-3.5-transcribe-live | ja-JP | SMART` transcription.
+3. Speak through at least one full AI reply and listen for the buzzer.
+4. Confirm the Live diagnostic shows `再生バッファ 300ms`.
+5. After the reply completes, press `PCM診断：直前AI音声を一括再生`.
+6. Compare whether the buzzer is present in the one-piece replay.
+7. Report both results separately: `通常再生で鳴った/鳴らない` and `PCM診断再生で鳴った/鳴らない`.
