@@ -1,6 +1,7 @@
-import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v1720.js?v=1.7.21';
+import { GAS_URL, buildSetupMessage, buildOpeningMessage } from './config-v1720.js?v=1.7.24';
 
 const WS_URL = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained';
+const LIVE_INTERNAL_SEND_HOOK='__PFC_LIVE_INTERNAL_SEND__';
 
 function bytesToBase64(bytes) {
   const u8 = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
@@ -61,6 +62,13 @@ export class GeminiLiveTransport {
   constructor({onState=()=>{},onAudio=()=>{},onInputTranscript=()=>{},onOutputTranscript=()=>{},onToolCall=()=>{},onToolCancellation=()=>{},onInterrupted=()=>{},onError=()=>{},onDiagnostic=()=>{},onTrace=()=>{}}={}) {
     Object.assign(this,{onState,onAudio,onInputTranscript,onOutputTranscript,onToolCall,onToolCancellation,onInterrupted,onError,onDiagnostic,onTrace});
     this.ws=null;this.ready=false;
+    this.internalSendHook=(message)=>{if(this.ready)this.sendText(message)};
+  }
+  installInternalSendHook(){
+    try{globalThis[LIVE_INTERNAL_SEND_HOOK]=this.internalSendHook}catch{}
+  }
+  removeInternalSendHook(){
+    try{if(globalThis[LIVE_INTERNAL_SEND_HOOK]===this.internalSendHook)delete globalThis[LIVE_INTERNAL_SEND_HOOK]}catch{}
   }
   sendObject(obj) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) throw new Error('Live socket is not open');
@@ -76,9 +84,9 @@ export class GeminiLiveTransport {
       const timer=setTimeout(()=>{if(settled)return;settled=true;reject(new Error('Gemini Live接続がタイムアウトしました'));try{this.ws?.close()}catch{}},15000);
       const ws=new WebSocket(`${WS_URL}?access_token=${encodeURIComponent(token)}`);this.ws=ws;
       ws.onopen=()=>{try{this.onDiagnostic({stage:'websocket',ok:true,message:'WebSocket open'});this.onTrace({type:'websocket-open'});this.onState('setup');this.sendObject(buildSetupMessage());}catch(e){clearTimeout(timer);if(!settled){settled=true;reject(e)}}};
-      ws.onmessage=async event=>{try{const msg=await decodeWebSocketMessage(event.data);if(msg.setupComplete){this.ready=true;this.onDiagnostic({stage:'setup',ok:true,message:'setupComplete'});this.onTrace({type:'setup-complete'});this.onState('ready');if(!settled){settled=true;clearTimeout(timer);resolve()}return}await this.handleMessage(msg)}catch(e){this.onError(e)}};
+      ws.onmessage=async event=>{try{const msg=await decodeWebSocketMessage(event.data);if(msg.setupComplete){this.ready=true;this.installInternalSendHook();this.onDiagnostic({stage:'setup',ok:true,message:'setupComplete'});this.onTrace({type:'setup-complete'});this.onState('ready');if(!settled){settled=true;clearTimeout(timer);resolve()}return}await this.handleMessage(msg)}catch(e){this.onError(e)}};
       ws.onerror=()=>{const e=new Error('Gemini Live WebSocket error');this.onDiagnostic({stage:'websocket',ok:false,message:e.message});this.onTrace({type:'websocket-error'});this.onError(e);if(!settled){settled=true;clearTimeout(timer);reject(e)}};
-      ws.onclose=e=>{this.ready=false;this.onDiagnostic({stage:'websocket-close',ok:e.code===1000,message:`code=${e.code}${e.reason?` reason=${e.reason}`:''}`});this.onTrace({type:'websocket-close',detail:`code=${e.code}`});this.onState('closed',{code:e.code,reason:e.reason});if(!settled){settled=true;clearTimeout(timer);reject(new Error(`Gemini Live closed before ready (${e.code})${e.reason?`: ${e.reason}`:''}`))}};
+      ws.onclose=e=>{this.ready=false;this.removeInternalSendHook();this.onDiagnostic({stage:'websocket-close',ok:e.code===1000,message:`code=${e.code}${e.reason?` reason=${e.reason}`:''}`});this.onTrace({type:'websocket-close',detail:`code=${e.code}`});this.onState('closed',{code:e.code,reason:e.reason});if(!settled){settled=true;clearTimeout(timer);reject(new Error(`Gemini Live closed before ready (${e.code})${e.reason?`: ${e.reason}`:''}`))}};
     });
   }
   async handleMessage(msg) {
@@ -101,5 +109,5 @@ export class GeminiLiveTransport {
   sendText(text) {if (!this.ready) return;this.sendObject({realtimeInput:{text:String(text||'')}});}
   sendToolResponses(functionResponses) { this.sendObject({toolResponse:{functionResponses}}); }
   endAudioStream() {if (!this.ready) return;this.sendObject({realtimeInput:{audioStreamEnd:true}});}
-  close() {try { if (this.ready) this.endAudioStream(); } catch {}this.ready=false;const ws=this.ws;this.ws=null;try { ws?.close(1000,'client-stop'); } catch {}}
+  close() {try { if (this.ready) this.endAudioStream(); } catch {}this.ready=false;this.removeInternalSendHook();const ws=this.ws;this.ws=null;try { ws?.close(1000,'client-stop'); } catch {}}
 }
