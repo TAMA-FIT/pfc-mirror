@@ -70,13 +70,8 @@ function recordFromCard(card) {
 }
 
 function patchVersion() {
-  const badge = document.querySelector('.app-build-version');
-  if (badge && badge.textContent !== APP_VERSION) badge.textContent = APP_VERSION;
-
-  const runtime = document.querySelector('#view-settings .runtime-panel p');
-  if (runtime && !runtime.textContent.includes(APP_VERSION)) {
-    runtime.innerHTML = runtime.innerHTML.replace(/v1\.\d+\.\d+/, APP_VERSION);
-  }
+  // Build/version ownership belongs to the current app/Live runtime.
+  // This legacy v1.7.15 UI module must never overwrite the current badge.
 }
 
 function patchTalkButton() {

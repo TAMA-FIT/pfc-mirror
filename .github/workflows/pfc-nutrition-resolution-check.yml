@@ -128,8 +128,9 @@ jobs:
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.21/);
-          assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.16/);
+          const legacyUi=fs.readFileSync('./clean/src/ui-polish-v1715.js','utf8');
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.22/);
+          assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.22/);
           assert.match(live,/config-v1720\.js\?v=1\.7\.21/);
           assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.21/);
           assert.match(live,/ユーザー発話:/);
@@ -138,10 +139,11 @@ jobs:
           assert.match(live,/buildEvidenceRecord/);
           assert.match(ui,/日本食品標準成分表/);
           assert.match(ui,/record-source-badge/);
+          assert.doesNotMatch(legacyUi,/badge\.textContent\s*=\s*APP_VERSION/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
             assert.match(html,/v1\.7\.21/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.21/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.22/);
           }
-          console.log('v1.7.21 runtime wiring/UI transparency: OK');
+          console.log('v1.7.21 runtime/UI with v1.7.22 cache bust: OK');
           NODE
