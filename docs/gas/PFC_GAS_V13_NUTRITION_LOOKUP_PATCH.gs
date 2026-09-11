@@ -14,11 +14,8 @@ var PFC_NUTRITION_LOOKUP_DEFAULT_DAILY_CAP_V13_ = 450;
 
 function pfcTryNutritionLookupV13_(e) {
   var payload;
-  try {
-    payload = JSON.parse((e && e.postData && e.postData.contents) || '{}');
-  } catch (err) {
-    return null;
-  }
+  try { payload = JSON.parse((e && e.postData && e.postData.contents) || '{}'); }
+  catch (err) { return null; }
   if (!payload || payload.taskType !== 'nutritionLookup') return null;
   return pfcHandleNutritionLookupV13_(payload);
 }
@@ -31,9 +28,7 @@ function pfcHandleNutritionLookupV13_(payload) {
     if (!foodName) return pfcJsonV13_({ok:false,status:'error',message:'foodName is required',gasBuild:PFC_NUTRITION_LOOKUP_BUILD_V13_});
 
     var quota = pfcTakeDailyQuotaV13_();
-    if (!quota.ok) {
-      return pfcJsonV13_({ok:false,status:'quota_exhausted',message:'nutrition lookup daily safety cap reached',gasBuild:PFC_NUTRITION_LOOKUP_BUILD_V13_,dailyCap:quota.limit});
-    }
+    if (!quota.ok) return pfcJsonV13_({ok:false,status:'quota_exhausted',message:'nutrition lookup daily safety cap reached',gasBuild:PFC_NUTRITION_LOOKUP_BUILD_V13_,dailyCap:quota.limit});
 
     var props = PropertiesService.getScriptProperties();
     var apiKey = props.getProperty('GEMMA_API_KEY') || props.getProperty('GEMINI_API_KEY');
@@ -47,17 +42,13 @@ function pfcHandleNutritionLookupV13_(payload) {
       generationConfig: {temperature:0.0, maxOutputTokens:1200}
     };
     var response = UrlFetchApp.fetch(endpoint, {
-      method:'post',
-      contentType:'application/json',
-      headers:{'x-goog-api-key':apiKey},
-      payload:JSON.stringify(requestBody),
-      muteHttpExceptions:true
+      method:'post',contentType:'application/json',headers:{'x-goog-api-key':apiKey},
+      payload:JSON.stringify(requestBody),muteHttpExceptions:true
     });
     var httpStatus = response.getResponseCode();
     var raw = response.getContentText();
     var googleBody;
-    try { googleBody = JSON.parse(raw); }
-    catch (err2) { googleBody = null; }
+    try { googleBody = JSON.parse(raw); } catch (err2) { googleBody = null; }
     if (httpStatus < 200 || httpStatus >= 300 || !googleBody) {
       return pfcJsonV13_({ok:false,status:'error',message:'Gemini search request failed',httpStatus:httpStatus,googleStatus:pfcGoogleStatusV13_(googleBody),gasBuild:PFC_NUTRITION_LOOKUP_BUILD_V13_});
     }
@@ -79,23 +70,11 @@ function pfcHandleNutritionLookupV13_(payload) {
     }
 
     return pfcJsonV13_({
-      ok:true,
-      status:'verified',
-      grounded:true,
-      officialSource:true,
-      brand:checked.brand,
-      productName:checked.productName,
-      servingLabel:checked.servingLabel,
-      kcal:checked.kcal,
-      p:checked.p,
-      f:checked.f,
-      c:checked.c,
-      sourceLabel:checked.sourceLabel,
-      sourceUrl:checked.sourceUrl,
-      sourceDomain:checked.sourceDomain,
-      model:PFC_NUTRITION_LOOKUP_MODEL_V13_,
-      verifiedAt:new Date().toISOString(),
-      webSearchQueries:webQueries,
+      ok:true,status:'verified',grounded:true,officialSource:true,
+      brand:checked.brand,productName:checked.productName,servingLabel:checked.servingLabel,
+      kcal:checked.kcal,p:checked.p,f:checked.f,c:checked.c,
+      sourceLabel:checked.sourceLabel,sourceUrl:checked.sourceUrl,sourceDomain:checked.sourceDomain,
+      model:PFC_NUTRITION_LOOKUP_MODEL_V13_,verifiedAt:new Date().toISOString(),webSearchQueries:webQueries,
       gasBuild:PFC_NUTRITION_LOOKUP_BUILD_V13_
     });
   } catch (err) {
@@ -135,8 +114,7 @@ function pfcParseJsonAnswerV13_(value) {
   var first = s.indexOf('{');
   var last = s.lastIndexOf('}');
   if (first < 0 || last <= first) return null;
-  try { return JSON.parse(s.slice(first,last+1)); }
-  catch (err) { return null; }
+  try { return JSON.parse(s.slice(first,last+1)); } catch (err) { return null; }
 }
 
 function pfcGroundingChunksV13_(metadata) {
@@ -177,17 +155,9 @@ function pfcValidateVerifiedNutritionV13_(parsed, metadata) {
   if (diff > Math.max(60,kcal*0.20)) return {ok:false,reason:'PFC/kcal consistency check failed'};
 
   return {
-    ok:true,
-    brand:brand,
-    productName:productName,
-    servingLabel:servingLabel,
-    kcal:Math.round(kcal),
-    p:Math.round(p*10)/10,
-    f:Math.round(f*10)/10,
-    c:Math.round(c*10)/10,
-    sourceLabel:pfcTextV13_(parsed.sourceLabel) || brand+'公式',
-    sourceUrl:sourceUrl,
-    sourceDomain:sourceDomain
+    ok:true,brand:brand,productName:productName,servingLabel:servingLabel,
+    kcal:Math.round(kcal),p:Math.round(p*10)/10,f:Math.round(f*10)/10,c:Math.round(c*10)/10,
+    sourceLabel:pfcTextV13_(parsed.sourceLabel) || brand+'公式',sourceUrl:sourceUrl,sourceDomain:sourceDomain
   };
 }
 
@@ -204,8 +174,8 @@ function pfcNormalizeDomainV13_(value) {
   return pfcTextV13_(value).toLowerCase().replace(/^https?:\/\//,'').replace(/^www\./,'').split('/')[0].split(':')[0];
 }
 function pfcUrlHostV13_(value) {
-  try { return pfcNormalizeDomainV13_(new URL(value).hostname); }
-  catch (err) { return ''; }
+  var match = pfcTextV13_(value).match(/^https?:\/\/([^\/?#]+)/i);
+  return match ? pfcNormalizeDomainV13_(match[1]) : '';
 }
 
 function pfcTakeDailyQuotaV13_() {
@@ -221,15 +191,9 @@ function pfcTakeDailyQuotaV13_() {
     if (count >= limit) return {ok:false,count:count,limit:limit};
     props.setProperty(key, String(count+1));
     return {ok:true,count:count+1,limit:limit};
-  } finally {
-    lock.releaseLock();
-  }
+  } finally { lock.releaseLock(); }
 }
 
-function pfcGoogleStatusV13_(body) {
-  return pfcTextV13_(body && body.error && (body.error.status || body.error.message));
-}
+function pfcGoogleStatusV13_(body) { return pfcTextV13_(body && body.error && (body.error.status || body.error.message)); }
 function pfcTextV13_(value) { return String(value == null ? '' : value).trim(); }
-function pfcJsonV13_(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
-}
+function pfcJsonV13_(obj) { return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
