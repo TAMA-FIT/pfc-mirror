@@ -1,8 +1,8 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.13';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.14';
 import { LiveMealDraft } from './draft-v170.js';
-import { GeminiLiveTransport } from './transport-v170.js?v=1.7.8';
+import { GeminiLiveTransport } from './transport-v170.js?v=1.7.14';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
 import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.12';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
@@ -111,7 +111,7 @@ function loadCss(){
   const link=document.createElement('link');
   link.id='pfc-live-v170-css';
   link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.13',import.meta.url).href;
+  link.href=new URL('../../assets/live-v170.css?v=1.7.14',import.meta.url).href;
   document.head.appendChild(link);
 }
 
