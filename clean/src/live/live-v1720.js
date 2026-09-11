@@ -1,14 +1,14 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
 import { buildEvidenceRecord, chooseNutritionMode, evidenceSourceText } from '../nutrition/evidence-v1716.js?v=1.7.24';
-import { LIVE_VERSION } from './config-v1720.js?v=1.7.24';
+import { LIVE_VERSION } from './config-v1720.js?v=1.7.25';
 import { LiveMealDraft } from './draft-v1716.js?v=1.7.24';
 import { GeminiLiveTransport } from './transport-v1720.js?v=1.7.24';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
 import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.12';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
-import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.24';
-import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL, isLookupDebugEnabled, getLookupDiagnostics, formatLookupDiagnosticsText, clearLookupDiagnostics, setLookupDiagnosticListener } from './nutrition-lookup-v1720.js?v=1.7.24';
+import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.25';
+import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL, isLookupDebugEnabled, getLookupDiagnostics, formatLookupDiagnosticsText, clearLookupDiagnostics, setLookupDiagnosticListener } from './nutrition-lookup-v1720.js?v=1.7.25';
 
 const draft=new LiveMealDraft();
 const LIVE_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('liveDebug')==='1';
@@ -95,7 +95,7 @@ function handleLiveTrace(event={}){
 function loadCss(){
   if(document.getElementById('pfc-live-v1721-css'))return;
   const link=document.createElement('link');link.id='pfc-live-v1721-css';link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.24',import.meta.url).href;document.head.appendChild(link);
+  link.href=new URL('../../assets/live-v170.css?v=1.7.25',import.meta.url).href;document.head.appendChild(link);
 }
 function ensureModal(){
   if(modal)return modal;
