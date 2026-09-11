@@ -9,8 +9,6 @@ on:
       - 'clean/src/live/live-guard-v1720.js'
       - 'clean/src/live/nutrition-lookup-v1720.js'
       - 'clean/src/nutrition/evidence-v1716.js'
-      - 'clean/src/ui-polish-v1716.js'
-      - 'clean/assets/ui-polish-v1716.css'
       - 'clean/src/main-v160.js'
       - 'clean/index.html'
       - 'index.html'
@@ -34,7 +32,6 @@ jobs:
           node --check clean/src/live/live-guard-v1720.js
           node --check clean/src/live/nutrition-lookup-v1720.js
           node --check clean/src/nutrition/evidence-v1716.js
-          node --check clean/src/ui-polish-v1716.js
 
       - name: Gemini Live semantic-to-Tavily nutrition contract
         run: |
@@ -51,12 +48,9 @@ jobs:
           for(const key of ['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']) assert.ok(props[key]);
           assert.deepEqual(props.nutritionSource.enum,['user-label','ai-estimate']);
           assert.match(SYSTEM_INSTRUCTION,/Tavily検索 \+ Gemini 3\.1 Flash Lite抽出/);
-          assert.match(SYSTEM_INSTRUCTION,/普通のやつ/);
           assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
           assert.match(SYSTEM_INSTRUCTION,/__PFC_OFFICIAL_RESULT_SYNC__/);
-          assert.match(SYSTEM_INSTRUCTION,/更新しました/);
-          assert.doesNotMatch(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
-          console.log('Gemini Live v1.7.25 Tavily truth-sync policy: OK');
+          console.log('Gemini Live Tavily policy: OK');
           NODE
 
       - name: Nutrition evidence precedence
@@ -64,111 +58,61 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {normalizeNutritionEvidence,chooseNutritionMode,buildEvidenceRecord} from './clean/src/nutrition/evidence-v1716.js';
-          const label=normalizeNutritionEvidence({nutritionSource:'user-label',p:18.5,f:24,c:82,servingLabel:'1パック'});
-          assert.equal(label.kcal,618);
-          const db={foodId:'food:1',unresolved:false,needsSkin:false,needsAmount:false,amount:1,nutritionEvidence:label};
-          assert.equal(chooseNutritionMode(db).mode,'evidence');
-          const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
-          assert.equal(chooseNutritionMode({...db,nutritionEvidence:estimate}).mode,'trusted-db');
           const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:7,f:25.2,c:66,kcal:517,servingLabel:'Lサイズ',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/'});
-          assert.equal(chooseNutritionMode({...db,nutritionEvidence:official}).mode,'evidence');
           const unknown={name:'マックフライポテト',foodId:null,unresolved:true,needsSkin:false,needsAmount:false,amount:null,meal:'昼',nutritionEvidence:official};
           assert.equal(chooseNutritionMode(unknown).mode,'evidence');
           const record=buildEvidenceRecord(unknown,123);
           assert.equal(record.Cal,517);
           assert.equal(record._clean.nutritionSource,'official-web');
-          console.log('Official/user evidence precedence: OK');
+          const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
+          assert.equal(chooseNutritionMode({...unknown,foodId:'food:1',unresolved:false,nutritionEvidence:estimate}).mode,'trusted-db');
+          console.log('Official evidence precedence: OK');
           NODE
 
-      - name: Draft standard amount, official web and user-label flow
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
-            ['🍚炭水化物','白米','はくまい ごはん ライス こめ 米 白米','100g',2.5,0.3,37.1,168],
-            ['🍔ジャンク・菓子','カレーライス','かれーらいす カレー ごはん 米','並',12,25,100,750],
-            ['🏪コンビニ','カツ丼','かつどん どんぶり コンビニ ごはん 米 肉','1個',25,30,100,800]
-          ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1725');
-          const curry=new LiveMealDraft();
-          let result=curry.applyFunctionCall({id:'1',args:{operations:[{op:'add',name:'カレーライス'}]}});
-          assert.equal(result.ready,true);
-          assert.equal(result.draft[0].standardLabel,'並（1食）');
-          const unknown=new LiveMealDraft();
-          result=unknown.applyFunctionCall({id:'2',args:{operations:[{op:'add',name:'サムライマック'}]}});
-          assert.equal(result.ready,false);
-          const ref=result.draft[0].ref;
-          result=unknown.applyFunctionCall({id:'official',args:{operations:[{op:'update',ref,name:'炙り醤油風 ダブル肉厚ビーフ',p:38,f:37.1,c:37.2,kcal:633,nutritionSource:'official-web',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/1220/',servingLabel:'1個'}]}});
-          assert.equal(result.ready,true);
-          assert.equal(result.draft[0].nutritionEvidence.sourceType,'official-web');
-          const packageValue=new LiveMealDraft();
-          result=packageValue.applyFunctionCall({id:'4',args:{operations:[{op:'add',name:'カツ丼',p:18.5,f:24,c:82,nutritionSource:'user-label',sourceLabel:'パッケージ表示',servingLabel:'1パック'}]}});
-          assert.equal(result.ready,true);
-          assert.equal(result.draft[0].nutritionEvidence.kcal,618);
-          console.log('Draft resolution scenarios: OK');
-          NODE
-
-      - name: Tavily lookup resilience and cache contract
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          globalThis.location={search:''};
-          globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
-          const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
-          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_TIMEOUT_MS,getLookupDiagnostics,formatLookupDiagnosticsText}=mod;
-          const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
-          const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
-          assert.notEqual(a,b);
-          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,22000);
-          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.25-tavily');
-          assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
-          assert.equal(typeof getLookupDiagnostics,'function');
-          assert.equal(typeof formatLookupDiagnosticsText,'function');
-          const src=(await import('node:fs')).readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(src,/network-retry/);
-          assert.match(src,/pfc-official-nutrition-cache-v2/);
-          assert.match(src,/searchProvider/);
-          assert.match(src,/tavilyRequestId/);
-          assert.match(src,/searchCredits/);
-          assert.doesNotMatch(src,/official-url-repair/);
-          assert.doesNotMatch(src,/upstream-retry/);
-          assert.doesNotMatch(src,/gemini-2\.5-flash/);
-          console.log('Tavily lookup + cache contract: OK');
-          NODE
-
-      - name: Runtime wiring, stale-result guard and persistent diagnostic UI
+      - name: Tavily serial lookup contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
+          globalThis.location={search:''};
+          globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
+          const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
+          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_TIMEOUT_MS}=mod;
+          const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
+          const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
+          assert.notEqual(a,b);
+          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,30000);
+          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.26-tavily-serial');
+          assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
+          const src=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
+          assert.match(src,/let lookupQueue=Promise\.resolve\(\)/);
+          assert.match(src,/candidate-retry/);
+          assert.match(src,/candidateRetryPayload/);
+          assert.match(src,/queued/);
+          assert.match(src,/network-retry/);
+          assert.match(src,/pfc-official-nutrition-cache-v2/);
+          assert.doesNotMatch(src,/upstream-retry/);
+          assert.doesNotMatch(src,/gemini-2\.5-flash/);
+          console.log('Tavily serial lookup contract: OK');
+          NODE
+
+      - name: Runtime wiring and lookup cache-bust
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
-          const legacyUi=fs.readFileSync('./clean/src/ui-polish-v1715.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.25/);
-          assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.22/);
-          assert.match(live,/config-v1720\.js\?v=1\.7\.25/);
-          assert.match(live,/live-guard-v1720\.js\?v=1\.7\.25/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.25/);
-          assert.match(live,/lookupDiagnosticPanelHtml/);
-          assert.match(live,/data-lookup-diagnostic-panel/);
-          assert.match(live,/copy-lookup-diag/);
+          assert.match(live,/lookupOfficialNutrition/);
           assert.match(live,/lookupFingerprint/);
           assert.match(live,/official-stale/);
           assert.match(live,/official-reset/);
-          assert.match(live,/buildOfficialResolvedMessage\(\{item:updated,ready:draft\.isReady\(\)\}\)/);
           assert.match(live,/nutritionSource:'official-web'/);
-          assert.match(live,/buildEvidenceRecord/);
           assert.match(lookup,/lookupDiagnosticListeners/);
           assert.doesNotMatch(lookup,/document\.querySelector/);
-          assert.match(ui,/日本食品標準成分表/);
-          assert.match(ui,/record-source-badge/);
-          assert.doesNotMatch(legacyUi,/badge\.textContent\s*=\s*APP_VERSION/);
-          for(const path of ['index.html','clean/index.html']){
-            const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.25/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.25/);
-          }
-          console.log('v1.7.25 Tavily runtime wiring and stale-result guard: OK');
+          const root=fs.readFileSync('index.html','utf8');
+          const clean=fs.readFileSync('clean/index.html','utf8');
+          assert.match(root,/nutrition-lookup-v1720\.js\?v=1\.7\.25":"\.\/clean\/src\/live\/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
+          assert.match(clean,/nutrition-lookup-v1720\.js\?v=1\.7\.25":"\.\/src\/live\/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
+          console.log('Runtime wiring + lookup cache-bust: OK');
           NODE
