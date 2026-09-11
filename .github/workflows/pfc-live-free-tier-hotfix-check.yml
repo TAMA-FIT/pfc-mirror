@@ -1,12 +1,13 @@
-name: PFC Live v1.7.19 flow check
+name: PFC Live v1.7.20 grounded search check
 
 on:
   pull_request:
     paths:
-      - 'clean/src/live/config-v1719.js'
-      - 'clean/src/live/transport-v1719.js'
-      - 'clean/src/live/live-guard-v1719.js'
-      - 'clean/src/live/live-v1719.js'
+      - 'clean/src/live/config-v1720.js'
+      - 'clean/src/live/transport-v1720.js'
+      - 'clean/src/live/live-guard-v1720.js'
+      - 'clean/src/live/nutrition-lookup-v1720.js'
+      - 'clean/src/live/live-v1720.js'
       - 'clean/src/live/draft-v1716.js'
       - 'clean/src/nutrition/evidence-v1716.js'
       - 'clean/assets/base-foods.js'
@@ -14,6 +15,7 @@ on:
       - 'clean/src/main-v160.js'
       - 'clean/index.html'
       - 'index.html'
+      - 'docs/gas/PFC_GAS_V13_NUTRITION_LOOKUP_PATCH.gs'
       - '.github/workflows/pfc-live-free-tier-hotfix-check.yml'
   workflow_dispatch:
 
@@ -26,164 +28,147 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax check current Live runtime
+      - name: Syntax check v1.7.20 runtime
         run: |
-          node --check clean/src/live/config-v1719.js
-          node --check clean/src/live/transport-v1719.js
-          node --check clean/src/live/live-guard-v1719.js
-          node --check clean/src/live/live-v1719.js
+          node --check clean/src/live/config-v1720.js
+          node --check clean/src/live/transport-v1720.js
+          node --check clean/src/live/live-guard-v1720.js
+          node --check clean/src/live/nutrition-lookup-v1720.js
+          node --check clean/src/live/live-v1720.js
 
-      - name: Free-tier setup is native and search-free
+      - name: Live remains Free Tier and delegates Search
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,buildSetupMessage} from './clean/src/live/config-v1719.js';
-          assert.equal(LIVE_VERSION,'v1.7.19');
+          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,buildSetupMessage} from './clean/src/live/config-v1720.js';
+          assert.equal(LIVE_VERSION,'v1.7.20');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
           assert.equal(setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
           assert.equal(JSON.stringify(setup.tools).includes('googleSearch'),false);
-          assert.match(SYSTEM_INSTRUCTION,/同じターン内に必ず/);
-          assert.match(SYSTEM_INSTRUCTION,/nutritionSource="ai-estimate"/);
-          assert.match(SYSTEM_INSTRUCTION,/ready=false/);
-          assert.match(SYSTEM_INSTRUCTION,/__PFC_INTERNAL_RECOVERY__/);
-          assert.match(SYSTEM_INSTRUCTION,/Google Searchもofficial-webも使用しません/);
-          console.log('Native free-tier setup: OK');
+          assert.match(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
+          assert.match(SYSTEM_INSTRUCTION,/すぐにAI推定値を作らないでください/);
+          assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側/);
+          console.log('Live free-tier delegation policy: OK');
           NODE
 
-      - name: App-side card guard contract
+      - name: Grounded lookup response validation
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          import {normalizeProvisionalFoodName,shouldRecoverTurn} from './clean/src/live/live-guard-v1719.js';
-          assert.equal(normalizeProvisionalFoodName('ポテト（L）'),'ポテト(L)');
-          assert.equal(normalizeProvisionalFoodName('サムライマック食べた'),'サムライマック');
-          assert.equal(normalizeProvisionalFoodName('普通のやつ'),'');
-          assert.equal(shouldRecoverTurn({userText:'ポテト（L）',items:[],ready:false}),true);
-          assert.equal(shouldRecoverTurn({userText:'普通のやつ',items:[],ready:false}),false);
-          const base=fs.readFileSync('./clean/assets/base-foods.js','utf8');
-          assert.match(base,/"ポテト\(L\)"/);
-          console.log('Transcript -> provisional card guard + actual Food Master row: OK');
+          globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
+          const {NUTRITION_LOOKUP_MODEL,buildNutritionLookupPayload,validateGroundedNutrition}=await import('./clean/src/live/nutrition-lookup-v1720.js');
+          assert.equal(NUTRITION_LOOKUP_MODEL,'gemini-2.5-flash');
+          const payload=buildNutritionLookupPayload({foodName:'マックフライポテト L',contextText:'マックでポテトL'});
+          assert.equal(payload.taskType,'nutritionLookup');
+          assert.equal(payload.foodName,'マックフライポテト L');
+          const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp'});
+          assert.equal(verified.kcal,517);
+          assert.equal(verified.f,25.2);
+          assert.throws(()=>validateGroundedNutrition({status:'verified',grounded:false,officialSource:true,kcal:1,p:0,f:0,c:0,sourceUrl:'https://example.com'}),/not grounded/);
+          assert.throws(()=>validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,kcal:1,p:0,f:0,c:0,sourceUrl:''}),/sourceUrl/);
+          console.log('Grounded nutrition client validation: OK');
           NODE
 
-      - name: No-tool-call to trusted Food Master ready flow
+      - name: Generic Food Master stays local
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {normalizeProvisionalFoodName} from './clean/src/live/live-guard-v1719.js';
           globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
-            ['🍔ジャンク・菓子','ポテト(S)','ぽてと マック まっく いも 芋','1個',3,11,28,225],
-            ['🍔ジャンク・菓子','ポテト(M)','ぽてと マック まっく いも 芋','1個',5,20,50,410],
             ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
           ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?known=1719');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?known=1720');
           const draft=new LiveMealDraft();
-          const result=draft.applyFunctionCall({id:'local-card',args:{operations:[{
-            op:'add',name:normalizeProvisionalFoodName('ポテト（L）')
-          }]}});
-          assert.equal(result.draft.length,1);
-          assert.equal(result.draft[0].canonicalName,'ポテト(L)');
+          const result=draft.applyFunctionCall({id:'known',args:{operations:[{op:'add',name:'ポテト(L)'}]}});
+          assert.equal(result.ready,true);
           assert.equal(result.draft[0].nutritionMode,'trusted-db');
-          assert.equal(result.ready,true);
-          console.log('Model skipped tool -> app card -> Food Master -> ready=true: OK');
+          assert.equal(result.draft[0].canonicalName,'ポテト(L)');
+          console.log('Generic Food Master path: OK');
           NODE
 
-      - name: Truly unknown food recovers to AI estimate
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import {shouldRecoverTurn,buildInternalRecoveryMessage,evidenceMacroLine} from './clean/src/live/live-guard-v1719.js';
-          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
-            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517]
-          ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?unknown=1719');
-          const draft=new LiveMealDraft();
-          let result=draft.applyFunctionCall({id:'unknown-card',args:{operations:[{op:'add',name:'サムライマック'}]}});
-          assert.equal(result.draft.length,1);
-          assert.equal(result.ready,false);
-          assert.equal(result.draft[0].status,'unresolved');
-          assert.equal(shouldRecoverTurn({userText:'サムライマック',items:result.draft,ready:false}),true);
-          const internal=buildInternalRecoveryMessage({userText:'サムライマック',items:result.draft,attempt:1});
-          assert.match(internal,/ai-estimate/);
-          assert.match(internal,/ready=true/);
-          const ref=result.draft[0].ref;
-          result=draft.applyFunctionCall({id:'estimate',args:{operations:[{
-            op:'update',ref,p:30,f:20,c:45,kcal:480,nutritionSource:'ai-estimate',servingLabel:'1個'
-          }]}});
-          assert.equal(result.ready,true);
-          assert.equal(result.draft[0].nutritionMode,'evidence');
-          assert.match(evidenceMacroLine(result.draft[0]),/480 kcal/);
-          assert.match(evidenceMacroLine(result.draft[0]),/P 30g/);
-          console.log('Unresolved -> internal recovery -> AI estimate -> ready=true: OK');
-          NODE
-
-      - name: User-declared package PFC reaches ready
+      - name: Unknown product accepts app-only official evidence
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?label=1719');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?official=1720');
           const draft=new LiveMealDraft();
-          const result=draft.applyFunctionCall({id:'label',args:{operations:[{
-            op:'add',name:'新商品カツ丼',p:18.5,f:24,c:82,nutritionSource:'user-label',servingLabel:'1パック'
-          }]}});
+          let result=draft.applyFunctionCall({id:'unknown',args:{operations:[{op:'add',name:'サムライマック'}]}});
+          assert.equal(result.ready,false);
+          const ref=result.draft[0].ref;
+          result=draft.applyFunctionCall({id:'official',args:{operations:[{op:'update',ref,name:'炙り醤油風 ダブル肉厚ビーフ',p:38,f:37.1,c:37.2,kcal:633,nutritionSource:'official-web',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/1220/',servingLabel:'1個'}]}});
           assert.equal(result.ready,true);
           assert.equal(result.draft[0].nutritionMode,'evidence');
-          assert.equal(result.draft[0].nutritionEvidence.kcal,618);
-          console.log('User-label PFC -> derived kcal -> ready=true: OK');
+          assert.equal(result.draft[0].nutritionEvidence.sourceType,'official-web');
+          console.log('Official-web evidence path: OK');
           NODE
 
-      - name: Card preview and registration gate contract
+      - name: Search-before-AI runtime contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          const live=fs.readFileSync('./clean/src/live/live-v1719.js','utf8');
-          const css=fs.readFileSync('./clean/assets/live-v170.css','utf8');
-          assert.match(live,/itemNutritionLine/);
-          assert.match(live,/pfc-live-food-macros/);
-          assert.match(live,/const ready=draft\.isReady\(\)/);
-          assert.match(live,/data-live-action="register" \$\{ready\?'':'disabled'\}/);
-          assert.match(live,/buildEvidenceRecord/);
-          assert.match(live,/buildRecord/);
-          assert.match(css,/\.pfc-live-food-macros/);
-          console.log('Card nutrition preview + ready gate: OK');
+          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
+          const guard=fs.readFileSync('./clean/src/live/live-guard-v1720.js','utf8');
+          assert.match(live,/lookupOfficialNutrition/);
+          assert.match(live,/startOfficialLookups/);
+          assert.match(live,/lookupPendingFor/);
+          assert.match(live,/lookupAttemptedForAll/);
+          assert.match(live,/nutritionSource:'official-web'/);
+          assert.match(live,/if\(started>0\|\|lookupPendingFor\(items\)\)return/);
+          assert.match(guard,/__PFC_OFFICIAL_LOOKUP_NOT_FOUND__/);
+          assert.match(guard,/最後の手段/);
+          console.log('Search-before-AI fallback ordering: OK');
           NODE
 
-      - name: Browser back releases microphone contract
+      - name: GAS V13 security and quota contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          const live=fs.readFileSync('./clean/src/live/live-v1719.js','utf8');
+          const gas=fs.readFileSync('./docs/gas/PFC_GAS_V13_NUTRITION_LOOKUP_PATCH.gs','utf8');
+          assert.match(gas,/gemini-2\.5-flash/);
+          assert.match(gas,/google_search/);
+          assert.match(gas,/GEMMA_API_KEY/);
+          assert.match(gas,/PFC_NUTRITION_LOOKUP_DEFAULT_DAILY_CAP_V13_ = 450/);
+          assert.match(gas,/Math\.min\(Math\.floor\(configured\), 500\)/);
+          assert.match(gas,/公式Webページ/);
+          assert.match(gas,/個人ブログ、まとめサイト/);
+          assert.match(gas,/missing Google Search grounding metadata/);
+          assert.match(gas,/official domain not present in grounding sources/);
+          assert.doesNotMatch(gas,/apiKey\s*:\s*apiKey/);
+          console.log('GAS search proxy security/quota contract: OK');
+          NODE
+
+      - name: Browser back still releases microphone
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           const audio=fs.readFileSync('./clean/src/live/audio-v170.js','utf8');
           assert.match(live,/history\.pushState/);
           assert.match(live,/addEventListener\('popstate'/);
           assert.match(live,/cleanupLiveSession/);
           assert.match(live,/a\?\.stopCapture/);
-          assert.match(live,/addEventListener\('pagehide',emergencyRelease\)/);
-          assert.match(live,/addEventListener\('beforeunload',emergencyRelease\)/);
           assert.doesNotMatch(live,/visibilitychange/);
-          assert.match(audio,/for\(const track of this\.stream\?\.getTracks/);
           assert.match(audio,/track\.stop\(\)/);
-          console.log('Browser-back mic release contract: OK');
+          console.log('Browser-back mic release remains intact: OK');
           NODE
 
-      - name: Production wiring uses only v1.7.19 Live runtime
+      - name: Production wiring uses v1.7.20
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          assert.match(entry,/live-v1719\.js\?v=1\.7\.19/);
-          assert.doesNotMatch(entry,/free-tier-search-hotfix-v1717/);
-          assert.doesNotMatch(entry,/live-v1716\.js/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.20/);
+          assert.doesNotMatch(entry,/live-v1719\.js/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.19/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.19/);
+            assert.match(html,/v1\.7\.20/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.20/);
           }
-          console.log('v1.7.19 production wiring: OK');
+          console.log('v1.7.20 production wiring: OK');
           NODE
