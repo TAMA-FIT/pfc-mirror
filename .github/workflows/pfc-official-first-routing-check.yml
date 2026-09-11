@@ -1,0 +1,85 @@
+name: PFC official-first routing hotfix check
+
+on:
+  pull_request:
+    paths:
+      - 'clean/src/live/nutrition-routing-hotfix-v1721.js'
+      - 'clean/src/main-v160.js'
+      - 'index.html'
+      - 'clean/index.html'
+      - '.github/workflows/pfc-official-first-routing-check.yml'
+  workflow_dispatch:
+
+jobs:
+  official-first-routing:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Syntax check routing hotfix
+        run: node --check clean/src/live/nutrition-routing-hotfix-v1721.js
+      - name: Brand search marker overrides local Food Master and premature AI
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
+            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517],
+            ['🍚主食','白米','ごはん ご飯 米','100g',2.5,0.3,37.1,168]
+          ];
+          const routing=await import('./clean/src/live/nutrition-routing-hotfix-v1721.js');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?v=1.7.16');
+
+          const generic=new LiveMealDraft();
+          let result=generic.applyFunctionCall({id:'rice',args:{operations:[{op:'add',name:'白米'}]}});
+          assert.equal(result.ready,true);
+          assert.equal(result.draft[0].nutritionMode,'trusted-db');
+
+          const branded=new LiveMealDraft();
+          result=branded.applyFunctionCall({id:'fries',args:{operations:[{op:'add',name:'ポテト(L)',sourceLabel:routing.OFFICIAL_SEARCH_MARKER}]}});
+          assert.equal(result.ready,false);
+          assert.equal(result.draft[0].status,'unresolved');
+          assert.equal(result.draft[0].nutritionMode,'pending');
+          assert.ok(result.draft[0].candidateNames.includes('ポテト(L)'));
+
+          const premature=new LiveMealDraft();
+          result=premature.applyFunctionCall({id:'samurai',args:{operations:[{op:'add',name:'炙り醤油風 ダブル肉厚ビーフ',p:30,f:28,c:53,kcal:520,nutritionSource:'ai-estimate',servingLabel:'1個'}]}});
+          assert.equal(result.ready,false);
+          assert.equal(result.draft[0].nutritionMode,'pending');
+          const ref=result.draft[0].ref;
+          routing.armAiEstimateFallbackOnce();
+          result=premature.applyFunctionCall({id:'fallback',args:{operations:[{op:'update',ref,p:30,f:28,c:53,kcal:520,nutritionSource:'ai-estimate',sourceLabel:'AI推定・目安',servingLabel:'1個'}]}});
+          assert.equal(result.ready,true);
+          assert.equal(result.draft[0].nutritionEvidence.sourceType,'ai-estimate');
+          console.log('official-first routing + fallback gate: OK');
+          NODE
+      - name: Opening policy uses semantic candidate then official search
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
+          const {buildRoutingOpeningText,OFFICIAL_SEARCH_MARKER}=await import('./clean/src/live/nutrition-routing-hotfix-v1721.js');
+          const text=buildRoutingOpeningText();
+          assert.match(text,/普通のやつ/);
+          assert.match(text,/最有力の商品候補名/);
+          assert.match(text,/Gemini 2\.5 Flash \+ Google Search/);
+          assert.match(text,new RegExp(OFFICIAL_SEARCH_MARKER));
+          assert.match(text,/p\/f\/c\/kcal\/nutritionSourceを作らない/);
+          console.log('semantic candidate -> official search opening policy: OK');
+          NODE
+      - name: Production entrypoint loads routing before Live
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
+          const routing=entry.indexOf('nutrition-routing-hotfix-v1721.js');
+          const live=entry.indexOf('live-v1720.js');
+          assert.ok(routing>=0&&live>routing);
+          for(const path of ['index.html','clean/index.html']){
+            const html=fs.readFileSync(path,'utf8');
+            assert.match(html,/main-v160\.js\?v=1\.7\.21/);
+          }
+          console.log('production wiring: OK');
+          NODE
