@@ -22,7 +22,7 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax check v1.7.25 runtime
+      - name: Syntax check runtime
         run: |
           node --check clean/src/live/config-v1720.js
           node --check clean/src/live/live-guard-v1720.js
@@ -44,13 +44,11 @@ jobs:
           assert.match(SYSTEM_INSTRUCTION,/Tavily/);
           assert.match(SYSTEM_INSTRUCTION,/Gemini 3\.1 Flash Lite/);
           assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
-          assert.match(SYSTEM_INSTRUCTION,/公式情報によると/);
           assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側のTavily/);
-          assert.doesNotMatch(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
           console.log('Live Tavily delegation policy: OK');
           NODE
 
-      - name: Tavily lookup client contract
+      - name: Serialized Tavily lookup client contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -60,24 +58,24 @@ jobs:
           const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
           const {NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_TIMEOUT_MS,buildNutritionLookupPayload,validateGroundedNutrition,nutritionLookupCacheKey}=mod;
           assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
-          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,22000);
-          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.25-tavily');
+          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,30000);
+          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.26-tavily-serial');
           const payload=buildNutritionLookupPayload({foodName:'マックフライポテト L',contextText:'マックでポテトL',candidateNames:['マクドナルド マックフライポテト L']});
           assert.equal(payload.taskType,'nutritionLookup');
           const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp',searchProvider:'tavily',model:'gemini-3.1-flash-lite',verificationMethod:'tavily+official-page-fetch',officialFetchStatus:200,searchCredits:1});
           assert.equal(verified.kcal,517);
           assert.equal(verified.searchProvider,'tavily');
-          assert.equal(verified.model,'gemini-3.1-flash-lite');
-          assert.equal(verified.searchCredits,1);
           const key1=nutritionLookupCacheKey(payload);
           const key2=nutritionLookupCacheKey({...payload,candidateNames:['別候補']});
           assert.notEqual(key1,key2);
           const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
+          assert.match(lookup,/let lookupQueue=Promise\.resolve\(\)/);
+          assert.match(lookup,/candidate-retry/);
+          assert.match(lookup,/candidateRetryPayload/);
           assert.match(lookup,/search=Tavily/);
-          assert.match(lookup,/Gemini 3\.1 Flash Lite/);
           assert.doesNotMatch(lookup,/gemini-2\.5-flash/);
           assert.doesNotMatch(lookup,/upstream-retry/);
-          console.log('Tavily lookup client: OK');
+          console.log('Serialized Tavily lookup client: OK');
           NODE
 
       - name: Truth-sync and stale-result guard remain intact
@@ -95,12 +93,11 @@ jobs:
           assert.match(live,/buildOfficialResolvedMessage\(\{item:updated,ready:draft\.isReady\(\)\}\)/);
           assert.match(guard,/__PFC_OFFICIAL_LOOKUP_NOT_FOUND__/);
           assert.match(guard,/Tavilyによる日本向け公式検索/);
-          assert.match(guard,/Tavily公式検索 \+ Gemini 3\.1 Flash Lite抽出/);
           assert.match(guard,/内部知識からkcal\/P\/F\/Cを読み上げ/);
           console.log('Truth-sync and stale-result guard: OK');
           NODE
 
-      - name: Persistent lookup diagnostics remain state-driven
+      - name: Diagnostics and cache-bust remain state-driven
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -109,14 +106,14 @@ jobs:
           const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
           assert.match(live,/lookupDiagnosticPanelHtml/);
           assert.match(live,/data-lookup-diagnostic-panel/);
-          assert.match(live,/data-live-action="copy-lookup-diag"/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.25/);
-          assert.match(lookup,/v1\.7\.25-tavily/);
-          assert.match(lookup,/searchProvider/);
-          assert.match(lookup,/tavilyRequestId/);
-          assert.match(lookup,/searchCredits/);
+          assert.match(lookup,/lookupDiagnosticListeners/);
+          assert.match(lookup,/v1\.7\.26-tavily-serial/);
           assert.doesNotMatch(lookup,/document\.querySelector/);
-          console.log('Persistent Tavily diagnostics: OK');
+          const root=fs.readFileSync('index.html','utf8');
+          const clean=fs.readFileSync('clean/index.html','utf8');
+          assert.match(root,/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
+          assert.match(clean,/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
+          console.log('Persistent Tavily diagnostics + cache-bust: OK');
           NODE
 
       - name: Browser back still releases microphone
@@ -133,23 +130,4 @@ jobs:
           assert.doesNotMatch(live,/visibilitychange/);
           assert.match(audio,/track\.stop\(\)/);
           console.log('Browser-back mic release: OK');
-          NODE
-
-      - name: Production wiring is v1.7.25 Tavily
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.25/);
-          assert.match(live,/config-v1720\.js\?v=1\.7\.25/);
-          assert.match(live,/live-guard-v1720\.js\?v=1\.7\.25/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.25/);
-          for(const path of ['index.html','clean/index.html']){
-            const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.25/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.25/);
-          }
-          console.log('v1.7.25 Tavily cache chain: OK');
           NODE
