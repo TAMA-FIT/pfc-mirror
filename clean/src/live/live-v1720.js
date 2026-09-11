@@ -1,14 +1,14 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { buildEvidenceRecord, chooseNutritionMode, evidenceSourceText } from '../nutrition/evidence-v1716.js?v=1.7.16';
-import { LIVE_VERSION } from './config-v1720.js?v=1.7.20';
+import { buildEvidenceRecord, chooseNutritionMode, evidenceSourceText } from '../nutrition/evidence-v1716.js?v=1.7.21';
+import { LIVE_VERSION } from './config-v1720.js?v=1.7.21';
 import { LiveMealDraft } from './draft-v1716.js?v=1.7.16';
-import { GeminiLiveTransport } from './transport-v1720.js?v=1.7.20';
+import { GeminiLiveTransport } from './transport-v1720.js?v=1.7.21';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
 import { LiveAudioIO, LIVE_AUDIO_TARGET_BUFFER_SEC } from './audio-v170.js?v=1.7.12';
 import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
-import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.20';
-import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL } from './nutrition-lookup-v1720.js?v=1.7.20';
+import { normalizeProvisionalFoodName, unresolvedItems, shouldRecoverTurn, buildInternalRecoveryMessage, buildOfficialResolvedMessage, evidenceMacroLine } from './live-guard-v1720.js?v=1.7.21';
+import { lookupOfficialNutrition, NUTRITION_LOOKUP_MODEL } from './nutrition-lookup-v1720.js?v=1.7.21';
 
 const draft=new LiveMealDraft();
 const LIVE_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('liveDebug')==='1';
@@ -92,9 +92,9 @@ function handleLiveTrace(event={}){
   else if(type==='websocket-close')addTrace(`ws-close ${event.detail||''}`.trim());
 }
 function loadCss(){
-  if(document.getElementById('pfc-live-v1720-css'))return;
-  const link=document.createElement('link');link.id='pfc-live-v1720-css';link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.20',import.meta.url).href;document.head.appendChild(link);
+  if(document.getElementById('pfc-live-v1721-css'))return;
+  const link=document.createElement('link');link.id='pfc-live-v1721-css';link.rel='stylesheet';
+  link.href=new URL('../../assets/live-v170.css?v=1.7.21',import.meta.url).href;document.head.appendChild(link);
 }
 function ensureModal(){
   if(modal)return modal;
@@ -110,11 +110,11 @@ function itemStatus(item){
   }
   const ls=lookupState(item);
   if(item.unresolved&&ls?.status==='searching')return `公式情報を検索中（${NUTRITION_LOOKUP_MODEL}）`;
-  if(item.unresolved&&ls?.status==='not_found')return '公式情報なし・Food Master候補/AI推定を確認中';
-  if(item.unresolved&&ls?.status==='error')return '公式検索失敗・Food Master候補/AI推定を確認中';
+  if(item.unresolved&&ls?.status==='not_found')return '公式情報を確定できず・商品候補を確認中';
+  if(item.unresolved&&ls?.status==='error')return '公式検索エラー・商品候補を確認中';
   if(item.needsSkin&&item.needsAmount)return '皮あり・皮なしと量を確認します';
   if(item.needsSkin)return '皮あり・皮なしを確認します';
-  if(item.unresolved)return item.candidateNames?.length?'Food Master候補を確認中':'公式情報を検索します';
+  if(item.unresolved)return item.candidateNames?.length?'公式検索用の商品候補を確認中':'公式情報を検索します';
   if(item.needsAmount)return '量を確認します';
   if(item.assumed)return `標準量：${item.standardLabel||formatAmount(item.amount,item.unit)}`;
   return '確認済み';
@@ -213,7 +213,9 @@ function startOfficialLookups(items=draft.snapshot()){
 async function resolveOfficialItem(item){
   const ref=item.ref;const originalName=item.name;lookupStates.set(ref,{status:'searching',name:originalName});addTrace(`official-search ${originalName}`);render();
   try{
-    const result=await lookupOfficialNutrition({foodName:originalName,contextText:lastUser,candidateNames:item.candidateNames||[]});
+    const candidates=[originalName,item.canonicalName,...(item.candidateNames||[])].map(x=>String(x||'').trim()).filter(Boolean).filter((x,i,a)=>a.indexOf(x)===i).slice(0,5);
+    const contextText=[lastUser?`ユーザー発話: ${lastUser}`:'',item.canonicalName?`カード候補: ${item.canonicalName}`:''].filter(Boolean).join(' / ');
+    const result=await lookupOfficialNutrition({foodName:originalName,contextText,candidateNames:candidates});
     const current=draft.snapshot().find(x=>x.ref===ref);
     if(!current||current.name!==originalName||!current.unresolved||current.nutritionEvidence)return;
     if(result?.status==='verified'){
@@ -229,7 +231,7 @@ async function resolveOfficialItem(item){
       }
       return;
     }
-    lookupStates.set(ref,{status:'not_found'});addTrace(`official-not-found ${originalName}`);render();scheduleTurnRecovery(40);
+    lookupStates.set(ref,{status:'not_found',result});addTrace(`official-not-found ${originalName}`);render();scheduleTurnRecovery(40);
   }catch(e){
     lookupStates.set(ref,{status:'error',message:String(e?.message||e)});addTrace(`official-error ${String(e?.message||e)}`);render();scheduleTurnRecovery(40);
   }
