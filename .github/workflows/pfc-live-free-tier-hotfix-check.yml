@@ -47,7 +47,7 @@ jobs:
           assert.match(SYSTEM_INSTRUCTION,/nutritionSource="ai-estimate"/);
           assert.match(SYSTEM_INSTRUCTION,/ready=false/);
           assert.match(SYSTEM_INSTRUCTION,/__PFC_INTERNAL_RECOVERY__/);
-          assert.doesNotMatch(SYSTEM_INSTRUCTION,/official-web/);
+          assert.match(SYSTEM_INSTRUCTION,/Google Searchもofficial-webも使用しません/);
           console.log('Native free-tier setup: OK');
           NODE
 
@@ -75,8 +75,8 @@ jobs:
           vm.runInThisContext(baseCode);
           const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?e2e=1719');
 
-          // Simulate the exact failure mode: model says a food verbally but makes no Tool Call.
-          // App-side guard creates the provisional card itself, so the memo can no longer stay empty forever.
+          // Exact real-device failure mode: model replies verbally but never calls the tool.
+          // App-side guard creates a provisional card, so the memo cannot remain empty forever.
           const potato=new LiveMealDraft();
           let result=potato.applyFunctionCall({id:'local-card',args:{operations:[{op:'add',name:normalizeProvisionalFoodName('ポテト（L）')}]}});
           assert.equal(result.draft.length,1);
@@ -99,7 +99,6 @@ jobs:
             assert.match(evidenceMacroLine(item),/C 55g/);
           }
 
-          // User label must independently reach ready=true without Food Master.
           const unknown=new LiveMealDraft();
           result=unknown.applyFunctionCall({id:'label',args:{operations:[{
             op:'add',name:'新商品カツ丼',p:18.5,f:24,c:82,nutritionSource:'user-label',servingLabel:'1パック'
