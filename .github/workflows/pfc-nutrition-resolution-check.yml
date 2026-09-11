@@ -94,7 +94,7 @@ jobs:
           result=unknown.applyFunctionCall({id:'3',args:{operations:[{op:'update',ref,p:30,f:20,c:45,kcal:480,nutritionSource:'ai-estimate',servingLabel:'1個'}]}});
           assert.equal(result.ready,true);
           assert.equal(result.draft[0].nutritionMode,'evidence');
-          assert.equal(result.draft[0].nutritionEvidence.source,'ai-estimate');
+          assert.equal(result.draft[0].nutritionEvidence.sourceType,'ai-estimate');
 
           const packageValue=new LiveMealDraft();
           result=packageValue.applyFunctionCall({id:'4',args:{operations:[{op:'add',name:'カツ丼',p:18.5,f:24,c:82,nutritionSource:'user-label',sourceLabel:'パッケージ表示',servingLabel:'1パック'}]}});
