@@ -21,7 +21,7 @@ export const SYSTEM_INSTRUCTION = [
   'Food Masterで解決済みの食品をAI推定で上書きしてはいけません。ただしuser-labelは実商品の明示値なので優先できます。',
   'update_meal_draft の結果がunresolvedでも、すぐにAI推定値を作らないでください。アプリ側がGemini 2.5 Flash + Google Searchで公式メーカー・公式チェーンの栄養情報を先に確認します。',
   'アプリから __PFC_OFFICIAL_LOOKUP_RESOLVED__ が来た場合、公式値はすでにDraftへ反映済みです。数値を変更せず、ready=trueなら画面確認後の登録を短く案内してください。',
-  'アプリから __PFC_OFFICIAL_LOOKUP_NOT_FOUND__ または __PFC_INTERNAL_RECOVERY__ が来た場合、ブランド・チェーン・市販品に見える食品はすぐAI推定へ落とさず、具体商品名・サイズ・現行候補を意味的に絞り直すか、必要ならユーザーへ1点だけ確認してください。',
+  'アプリから __PFC_OFFICIAL_LOOKUP_NOT_FOUND__ または __PFC_INTERNAL_RECOVERY__ が来た場合、ブランド・チェーン・市販品に見える食品はすぐにAI推定へ落とさず、具体商品名・サイズ・現行候補を意味的に絞り直すか、必要ならユーザーへ1点だけ確認してください。',
   '一般料理・自作料理など公式商品が存在しない食品で、候補でも解決できず、ユーザー明示P/F/Cも無い場合だけ、最後の手段として内部知識または合理的な料理構成からp/f/cを作り、nutritionSource="ai-estimate" とservingLabelを同じrefへupdate_meal_draftしてください。',
   'AI推定は必ず目安として扱ってください。ブランド商品名や料理名を知っていても、それだけで公式栄養値だと断定しないでください。',
   'あなた自身はnutritionSource="official-web"を送ってはいけません。official-webはアプリ側のGoogle検索経路だけが設定します。',
