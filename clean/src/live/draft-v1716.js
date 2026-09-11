@@ -1,6 +1,6 @@
 import { resolveFood, searchFoods, defaultAmount } from '../nutrition/catalog.js';
 import { autoMeal } from '../storage.js';
-import { normalizeNutritionEvidence, chooseNutritionMode } from '../nutrition/evidence-v1716.js?v=1.7.16';
+import { normalizeNutritionEvidence, chooseNutritionMode } from '../nutrition/evidence-v1716.js?v=1.7.24';
 
 const FORBIDDEN = new Set([
   'P','F','C','A','a','cal','Cal','foodId','food_id',

@@ -41,7 +41,7 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1720.js';
-          assert.equal(LIVE_VERSION,'v1.7.21');
+          assert.equal(LIVE_VERSION,'v1.7.24');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
@@ -52,11 +52,10 @@ jobs:
           assert.deepEqual(props.nutritionSource.enum,['user-label','ai-estimate']);
           assert.match(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
           assert.match(SYSTEM_INSTRUCTION,/普通のやつ/);
-          assert.match(SYSTEM_INSTRUCTION,/検索用の仮説/);
-          assert.match(SYSTEM_INSTRUCTION,/現行ラインナップ/);
-          assert.match(SYSTEM_INSTRUCTION,/すぐにAI推定へ落とさず/);
-          assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側のGoogle検索経路だけ/);
-          console.log('Gemini Live v1.7.21 semantic grounded-search policy: OK');
+          assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
+          assert.match(SYSTEM_INSTRUCTION,/__PFC_OFFICIAL_RESULT_SYNC__/);
+          assert.match(SYSTEM_INSTRUCTION,/更新しました/);
+          console.log('Gemini Live v1.7.24 truth-sync policy: OK');
           NODE
 
       - name: Nutrition evidence precedence
@@ -77,7 +76,7 @@ jobs:
           const record=buildEvidenceRecord(unknown,123);
           assert.equal(record.Cal,517);
           assert.equal(record._clean.nutritionSource,'official-web');
-          console.log('Official/user evidence outranks generic DB; AI estimate does not: OK');
+          console.log('Official/user evidence precedence: OK');
           NODE
 
       - name: Draft standard amount, official web and user-label flow
@@ -89,7 +88,7 @@ jobs:
             ['🍔ジャンク・菓子','カレーライス','かれーらいす カレー ごはん 米','並',12,25,100,750],
             ['🏪コンビニ','カツ丼','かつどん どんぶり コンビニ ごはん 米 肉','1個',25,30,100,800]
           ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1724');
           const curry=new LiveMealDraft();
           let result=curry.applyFunctionCall({id:'1',args:{operations:[{op:'add',name:'カレーライス'}]}});
           assert.equal(result.ready,true);
@@ -108,23 +107,31 @@ jobs:
           console.log('Draft resolution scenarios: OK');
           NODE
 
-      - name: Candidate-aware official lookup cache and diagnostics exports
+      - name: Official lookup resilience and cache contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
+          globalThis.location={search:''};
           globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
           const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
-          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,getLookupDiagnostics,formatLookupDiagnosticsText}=mod;
+          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_TIMEOUT_MS,getLookupDiagnostics,formatLookupDiagnosticsText}=mod;
           const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
           const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
           assert.notEqual(a,b);
-          assert.match(NUTRITION_LOOKUP_VERSION,/v1\.7\.23-persistent-diagnostics/);
+          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,22000);
+          assert.match(NUTRITION_LOOKUP_VERSION,/v1\.7\.24-truth-sync/);
           assert.equal(typeof getLookupDiagnostics,'function');
           assert.equal(typeof formatLookupDiagnosticsText,'function');
-          console.log('Candidate-aware cache + persistent diagnostics exports: OK');
+          const src=(await import('node:fs')).readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
+          assert.match(src,/OFFICIAL_URL_404/);
+          assert.match(src,/official-url-repair/);
+          assert.match(src,/network-retry/);
+          assert.match(src,/upstream-retry/);
+          assert.match(src,/pfc-official-nutrition-cache-v2/);
+          console.log('Lookup resilience + cache contract: OK');
           NODE
 
-      - name: Runtime wiring and persistent diagnostic UI
+      - name: Runtime wiring, stale-result guard and persistent diagnostic UI
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -134,15 +141,17 @@ jobs:
           const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
           const legacyUi=fs.readFileSync('./clean/src/ui-polish-v1715.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.23/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.24/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.22/);
-          assert.match(live,/config-v1720\.js\?v=1\.7\.21/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.23/);
+          assert.match(live,/config-v1720\.js\?v=1\.7\.24/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.24/);
           assert.match(live,/lookupDiagnosticPanelHtml/);
           assert.match(live,/data-lookup-diagnostic-panel/);
           assert.match(live,/copy-lookup-diag/);
-          assert.match(live,/ユーザー発話:/);
-          assert.match(live,/candidateNames:candidates/);
+          assert.match(live,/lookupFingerprint/);
+          assert.match(live,/official-stale/);
+          assert.match(live,/official-reset/);
+          assert.match(live,/buildOfficialResolvedMessage\(\{item:updated,ready:draft\.isReady\(\)\}\)/);
           assert.match(live,/nutritionSource:'official-web'/);
           assert.match(live,/buildEvidenceRecord/);
           assert.match(lookup,/lookupDiagnosticListeners/);
@@ -152,8 +161,8 @@ jobs:
           assert.doesNotMatch(legacyUi,/badge\.textContent\s*=\s*APP_VERSION/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.21/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.23/);
+            assert.match(html,/v1\.7\.24/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.24/);
           }
-          console.log('v1.7.21 runtime/UI with persistent lookup diagnostics and v1.7.23 cache bust: OK');
+          console.log('v1.7.24 runtime wiring and stale-result guard: OK');
           NODE
