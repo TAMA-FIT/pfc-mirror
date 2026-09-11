@@ -36,12 +36,12 @@ jobs:
           node --check clean/src/nutrition/evidence-v1716.js
           node --check clean/src/ui-polish-v1716.js
 
-      - name: Gemini Live semantic-to-grounded nutrition contract
+      - name: Gemini Live semantic-to-Tavily nutrition contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1720.js';
-          assert.equal(LIVE_VERSION,'v1.7.24');
+          assert.equal(LIVE_VERSION,'v1.7.25');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
@@ -50,12 +50,13 @@ jobs:
           const props=UPDATE_MEAL_DRAFT_DECLARATION.parametersJsonSchema.properties.operations.items.properties;
           for(const key of ['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']) assert.ok(props[key]);
           assert.deepEqual(props.nutritionSource.enum,['user-label','ai-estimate']);
-          assert.match(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
+          assert.match(SYSTEM_INSTRUCTION,/Tavily検索 \+ Gemini 3\.1 Flash Lite抽出/);
           assert.match(SYSTEM_INSTRUCTION,/普通のやつ/);
           assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
           assert.match(SYSTEM_INSTRUCTION,/__PFC_OFFICIAL_RESULT_SYNC__/);
           assert.match(SYSTEM_INSTRUCTION,/更新しました/);
-          console.log('Gemini Live v1.7.24 truth-sync policy: OK');
+          assert.doesNotMatch(SYSTEM_INSTRUCTION,/Gemini 2\.5 Flash \+ Google Search/);
+          console.log('Gemini Live v1.7.25 Tavily truth-sync policy: OK');
           NODE
 
       - name: Nutrition evidence precedence
@@ -88,7 +89,7 @@ jobs:
             ['🍔ジャンク・菓子','カレーライス','かれーらいす カレー ごはん 米','並',12,25,100,750],
             ['🏪コンビニ','カツ丼','かつどん どんぶり コンビニ ごはん 米 肉','1個',25,30,100,800]
           ];
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1724');
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1725');
           const curry=new LiveMealDraft();
           let result=curry.applyFunctionCall({id:'1',args:{operations:[{op:'add',name:'カレーライス'}]}});
           assert.equal(result.ready,true);
@@ -107,28 +108,32 @@ jobs:
           console.log('Draft resolution scenarios: OK');
           NODE
 
-      - name: Official lookup resilience and cache contract
+      - name: Tavily lookup resilience and cache contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           globalThis.location={search:''};
           globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
           const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
-          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_TIMEOUT_MS,getLookupDiagnostics,formatLookupDiagnosticsText}=mod;
+          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_TIMEOUT_MS,getLookupDiagnostics,formatLookupDiagnosticsText}=mod;
           const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
           const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
           assert.notEqual(a,b);
           assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,22000);
-          assert.match(NUTRITION_LOOKUP_VERSION,/v1\.7\.24-truth-sync/);
+          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.25-tavily');
+          assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
           assert.equal(typeof getLookupDiagnostics,'function');
           assert.equal(typeof formatLookupDiagnosticsText,'function');
           const src=(await import('node:fs')).readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(src,/OFFICIAL_URL_404/);
-          assert.match(src,/official-url-repair/);
           assert.match(src,/network-retry/);
-          assert.match(src,/upstream-retry/);
           assert.match(src,/pfc-official-nutrition-cache-v2/);
-          console.log('Lookup resilience + cache contract: OK');
+          assert.match(src,/searchProvider/);
+          assert.match(src,/tavilyRequestId/);
+          assert.match(src,/searchCredits/);
+          assert.doesNotMatch(src,/official-url-repair/);
+          assert.doesNotMatch(src,/upstream-retry/);
+          assert.doesNotMatch(src,/gemini-2\.5-flash/);
+          console.log('Tavily lookup + cache contract: OK');
           NODE
 
       - name: Runtime wiring, stale-result guard and persistent diagnostic UI
@@ -141,10 +146,11 @@ jobs:
           const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
           const legacyUi=fs.readFileSync('./clean/src/ui-polish-v1715.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.24/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.25/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.22/);
-          assert.match(live,/config-v1720\.js\?v=1\.7\.24/);
-          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.24/);
+          assert.match(live,/config-v1720\.js\?v=1\.7\.25/);
+          assert.match(live,/live-guard-v1720\.js\?v=1\.7\.25/);
+          assert.match(live,/nutrition-lookup-v1720\.js\?v=1\.7\.25/);
           assert.match(live,/lookupDiagnosticPanelHtml/);
           assert.match(live,/data-lookup-diagnostic-panel/);
           assert.match(live,/copy-lookup-diag/);
@@ -161,8 +167,8 @@ jobs:
           assert.doesNotMatch(legacyUi,/badge\.textContent\s*=\s*APP_VERSION/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.24/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.24/);
+            assert.match(html,/v1\.7\.25/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.25/);
           }
-          console.log('v1.7.24 runtime wiring and stale-result guard: OK');
+          console.log('v1.7.25 Tavily runtime wiring and stale-result guard: OK');
           NODE
