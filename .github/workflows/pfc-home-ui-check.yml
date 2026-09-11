@@ -26,38 +26,26 @@ jobs:
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          import {
-            APP_VERSION,
-            MEAL_ORDER,
-            mealKeyForRecord,
-            mealTotals
-          } from './clean/src/ui-polish-v1715.js';
-
+          import {APP_VERSION,MEAL_ORDER,mealKeyForRecord,mealTotals} from './clean/src/ui-polish-v1715.js';
           assert.equal(APP_VERSION, 'v1.7.15');
           assert.deepEqual(MEAL_ORDER, ['朝', '昼', '晩', '間食']);
           assert.equal(mealKeyForRecord({time:'昼'}), '昼');
           assert.equal(mealKeyForRecord({}, '晩・200g'), '晩');
           assert.equal(mealKeyForRecord({}, '不明'), '間食');
-
-          const total = mealTotals([
-            {Cal:300,P:20,F:5,C:40},
-            {Cal:200,P:10,F:7,C:25}
-          ]);
+          const total = mealTotals([{Cal:300,P:20,F:5,C:40},{Cal:200,P:10,F:7,C:25}]);
           assert.deepEqual(total, {kcal:500,p:30,f:12,c:65});
-
           const css = fs.readFileSync('./clean/assets/ui-polish-v1715.css', 'utf8');
           assert.match(css, /\.macro-p \.macro-cal-pill/);
           assert.match(css, /\.macro-f \.macro-cal-pill/);
           assert.match(css, /\.macro-c \.macro-cal-pill/);
           assert.match(css, /\.senior-talk-btn \.live-icon/);
           assert.match(css, /\.meal-record-group/);
-
           const entry = fs.readFileSync('./clean/src/main-v160.js', 'utf8');
           assert.match(entry, /ui-polish-v1715\.js\?v=1\.7\.15/);
           for (const path of ['index.html','clean/index.html']) {
             const html = fs.readFileSync(path, 'utf8');
-            assert.match(html, /v1\.7\.19/);
-            assert.match(html, /main-v160\.js\?v=1\.7\.19/);
+            assert.match(html, /v1\.7\.20/);
+            assert.match(html, /main-v160\.js\?v=1\.7\.20/);
           }
-          console.log('PFC v1.7.15 home UI layer remains valid under v1.7.19 entrypoint: OK');
+          console.log('PFC v1.7.15 home UI layer remains valid under v1.7.20 entrypoint: OK');
           NODE
