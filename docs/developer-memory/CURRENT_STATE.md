@@ -4,152 +4,141 @@ Last memory refresh: 2026-09-11 JST
 
 ## Canonical rule
 
-Fresh GitHub `main` is always canonical for code and version state. This file records current architecture, verified milestones, known limits, and release gates. If this file conflicts with Fresh `main`, Fresh `main` wins.
+Fresh GitHub `main` is always canonical for code and version state. This file records the current architecture, verified milestones, known limits, and release gates. If this file conflicts with Fresh `main`, Fresh `main` wins.
 
 ## Public runtime
 
 - Public URL: `https://tama-fit.github.io/pfc-mirror/`
-- v1.7.18 production main before the current candidate: `ebdc8a9a47c7f270731bccbfbc24fe55b0c8d232`
-- Current candidate: **v1.7.19**
-- Candidate PR: **#46 — Consolidate Gemini Live flow and lifecycle in v1.7.19**
+- Production before the current candidate: **v1.7.20**, main `4f60de792ff77653190fe06e5cda5b65ff92c885`
+- Current candidate: **v1.7.21 semantic-to-grounded nutrition search**
+- Candidate branch: `fix/v1721-semantic-official-search`
 - Root `index.html` and `clean/index.html` are both active version/cache surfaces and must move together.
 
 ## Current Gemini Live architecture
 
-The production path is Free Tier oriented and must not depend on paid Google Search Grounding.
+Gemini Live remains Free Tier oriented. Google Search is NOT attached to the Gemini 3.1 Live session.
 
 ```text
 microphone
-  -> Gemini 3.1 Flash Live conversation
-  -> update_meal_draft Function Calling
+  -> Gemini 3.1 Flash Live
+       semantic interpretation / vague-language understanding
+       update_meal_draft Function Calling
   -> LiveMealDraft
-  -> trusted Food Master / MEXT resolver
+  -> generic exact Food Master/MEXT resolution when appropriate
+  -> unresolved branded/product item
+  -> GAS nutritionLookup
+  -> Gemini 2.5 Flash + Google Search Grounding
+  -> current official product identification/correction
+  -> verified official P/F/C/kcal
   -> card preview
   -> explicit user Register
   -> deterministic record write
 ```
 
-A second `gemini-3.5-transcribe-live` stream remains dedicated to visible Japanese transcription. Permanent Gemini API keys stay in GAS; the browser receives short-lived tokens.
+A second transcription stream remains dedicated to visible Japanese transcription. Permanent Gemini API keys stay in GAS Script Properties; the browser receives short-lived Live tokens and never receives the permanent key.
 
-### v1.7.19 production wiring
+## v1.7.21 semantic-to-grounded design
 
-`clean/src/main-v160.js` loads the consolidated `live-v1719.js` runtime. The old v1.7.16 Live runtime and `free-tier-search-hotfix-v1717.js` remain historical files only and must not be loaded by the production entrypoint.
-
-`config-v1719.js` contains the Free Tier contract directly. There is no runtime WebSocket monkey patch and no `googleSearch` tool in the setup payload.
-
-## Nutrition resolution priority
-
-The intended precedence is:
-
-1. **User-declared package/menu nutrition (`user-label`)** — if the user explicitly reads P/F/C from a product label/menu, keep those exact values. If kcal is absent, derive kcal mechanically with `4P + 9F + 4C` and mark it as derived.
-2. **Trusted local DB** — Food Master / MEXT exact trusted resolution. AI must not overwrite an already resolved DB item with an estimate.
-3. **AI estimate (`ai-estimate`)** — only when the food remains unresolved and the user did not provide explicit nutrition. It is stored/displayed as an estimate, never as official data.
-
-Paid `official-web` / Google Search is currently disabled in the public Free Tier path.
-
-## Standard amount transparency
-
-Do not invent gram conversions that the source DB does not contain.
+The key rule is: **AI may infer the product; AI may not invent the product nutrition.**
 
 Examples:
 
-- Food Master basis `並` -> display a source-faithful label such as `並（1食）`.
-- A verified conversion such as rice `1杯 = 150g` may show both.
-- If the DB only knows `1個`, `1皿`, `並`, etc., do not fabricate grams.
+- `サムライマック 普通のやつ` -> Live may infer a concrete current/likely Samurai Mac candidate as a search hypothesis.
+- That hypothesis is not trusted nutrition evidence. It is sent with user context and candidate names to the separate Gemini 2.5 Flash search worker.
+- Search worker checks the current official lineup and may correct an obsolete/end-of-sale candidate before reading nutrition.
+- `マックのポテトL` should preserve McDonald's + L-size semantics instead of collapsing early to generic `ポテト`.
+- If a branded product remains ambiguous after search, refine the candidate or ask one short clarification instead of silently inventing P/F/C.
 
-## v1.7.19 turn guard
+The app sends `foodName`, `contextText`, and `candidateNames` to the GAS search worker. Search cache keys include all three, so changing the semantic candidate does not reuse an unrelated cached result.
 
-Real-device v1.7.18 exposed an important failure mode: Gemini could correctly recognize a food verbally but skip `update_meal_draft`. That left the memo empty and Register permanently disabled.
+## Nutrition resolution priority
 
-v1.7.19 adds an app-side recovery layer so correctness does not depend entirely on model tool-call compliance:
+The intended precedence for values actually shown/saved is:
 
-- after a user turn, if the Draft is still empty/pending, the app checks the transcript
-- for a simple food utterance the app can create a provisional Draft item itself
-- trusted Food Master resolution may immediately make it registerable
-- truly unresolved items trigger an internal recovery instruction asking Gemini to use a clear Food Master candidate or attach `ai-estimate` evidence
-- recovery attempts are bounded; normal quantity/skin clarification states are not treated as unresolved-food failures
-- the model must not tell the user to press Register while `ready=false`
+1. **User-declared package/menu nutrition (`user-label`)** — exact values explicitly read/provided by the user.
+2. **Verified official Web nutrition (`official-web`)** — manufacturer/chain/brand official search result. This outranks a generic Food Master match for the same branded product.
+3. **Trusted local DB (`trusted-db`)** — Food Master / MEXT for generic foods and deterministic local matches.
+4. **AI estimate (`ai-estimate`)** — last resort only for foods/recipes where official product data does not exist or cannot reasonably apply. AI estimate must not override verified official data or trusted DB.
 
-The current Food Master includes `ポテト(L)` with P6 / F25 / C65 / 517 kcal, so the real-device phrase `ポテト（L）` should be recoverable through trusted DB even if Gemini initially only replies verbally.
+This precedence is implemented in `clean/src/nutrition/evidence-v1716.js` even though the historical filename remains unchanged.
 
-## Live card contract
+## GAS nutrition search worker
 
-Before Register is enabled, the Live card is the user-visible source of truth for what will be saved.
+Current candidate contract: `PFC_GAS_NUTRITION_LOOKUP_V13_1_FLEX` using `gemini-2.5-flash` + `google_search`.
+
+Security / quota:
+
+- permanent API key remains in Script Properties (`GEMMA_API_KEY` / compatible fallback)
+- key is never returned to the browser
+- default safety cap 450 searches/day
+- hard cap 500/day
+
+Search behavior:
+
+- vague user wording is interpreted semantically rather than used as a literal search query
+- Live-proposed product names are hypotheses, not facts
+- old/end-of-sale names trigger a search for the current official lineup
+- multiple search steps are allowed: identify current product first, then verify official nutrition
+- official manufacturer/chain/product pages, official PDFs, and official nutrition tables are preferred
+- numeric P/F/C/kcal may not be filled from model memory
+- non-official blogs/social/wiki/calorie databases cannot become `verified`
+- Google Search grounding metadata is required
+- do not require grounding chunk URLs themselves to contain the official domain because Google may return redirect/tracking URIs
+- source URL/domain supplied for the verified record must still be HTTPS, internally consistent, and non-blocklisted
+- PFC/kcal check rejects only obvious numerical contradictions; normal labeling/rounding/fiber differences are tolerated
+
+Successful results include `resolutionNote`, provenance, product identity, serving label, P/F/C/kcal, model, and verification timestamp.
+
+## Live card / readiness contract
+
+The Live card is the user-visible source of truth before registration.
 
 For a ready item the card must show:
 
-- resolved/display food name
+- resolved/display product name
 - amount / serving basis
-- source/status (`標準量`, `パッケージ・表示値`, `AI推定・目安`, etc.)
+- source/status
 - kcal and P/F/C preview
 
-The Register button is enabled only when `draft.isReady()` is true. Registration then uses the same trusted DB/evidence object shown by the card.
+Verified official search results use `official-web` evidence and should display the official source label. The Register button is enabled only when `draft.isReady()` is true. Registration uses the same DB/evidence object shown in the card.
+
+For branded products, an official-search miss must not immediately become a plausible-looking AI estimate. The Live recovery path should first refine product identity / size or ask one concise clarification.
 
 ## Browser / microphone lifecycle
 
-Live microphone capture must never silently remain active after the user leaves the Live surface.
-
-v1.7.19 behavior:
+Preserve the v1.7.19+ cleanup behavior:
 
 - opening Live pushes a same-page history state
-- Android/browser Back while Live is open is treated as closing Live first
-- cleanup closes the transcriber and Live WebSocket and calls `stopCapture()` on the microphone tracks before returning/reloading the home surface
-- `pagehide` and `beforeunload` are emergency release paths
-- **do not auto-close on `visibilitychange` yet**; the user has not decided whether temporarily switching apps should end Live
+- browser/Android Back closes Live first
+- cleanup closes transcriber and Live WebSocket and stops microphone tracks
+- `pagehide` and `beforeunload` remain emergency release paths
+- do not auto-close on `visibilitychange` unless the owner explicitly changes that policy
 
-## Audio playback status
+## Release gate
 
-The previous mechanical-buzzer investigation remains resolved at the architecture level by the persistent AudioWorklet playback path. Keep the existing AudioWorklet/diagnostic code unless a new real-device regression proves otherwise.
-
-## Release-gate lesson from v1.7.16-v1.7.18
-
-Do not validate a feature only at schema/function level and then ship it.
-
-For every user-visible Live behavior change, test the complete user journey that the change claims to support. For food recording this means, as applicable:
+Do not release based only on prompt/schema/unit tests. Validate the claimed user outcome end-to-end-ish:
 
 ```text
 user speech
- -> transcription/semantic interpretation
- -> Tool Call OR app-side recovery
- -> card appears
- -> correct source/amount/PFC is visible
- -> draft reaches ready=true
- -> Register becomes enabled
+ -> semantic product interpretation
+ -> Tool Call / app recovery
+ -> official lookup when applicable
+ -> current product identity
+ -> correct source/serving/PFC visible in card
+ -> draft ready=true only when appropriate
+ -> Register enabled
  -> saved record matches preview
  -> leaving Live releases microphone/resources
 ```
 
-A passing prompt/schema test is not sufficient if the visible card, registration gate, or resource lifecycle has not also been checked.
+Required v1.7.21 scenarios include:
 
-## CI gates for v1.7.19
+- `サムライマック 普通のやつ` -> semantic concrete hypothesis -> official current-product search; obsolete product names must not become authoritative nutrition
+- `マックのポテトL` -> preserve brand/size; official verified values may override a generic Food Master row
+- `マックのスプライトM` -> official search first; no ungrounded fat/carbohydrate fabrication
+- generic `白米 普通` -> trusted local Food Master path without unnecessary Web lookup
+- package P/F/C -> `user-label`
+- unknown local/home-made dish -> AI estimate only as last resort
+- Browser Back -> microphone/resources released
 
-PR #46 adds/updates contracts covering:
-
-- current Live runtime syntax
-- no Google Search in Free Tier setup
-- `ポテト（L）` transcript normalization and real Food Master row presence
-- model-skips-tool -> app provisional card -> trusted Food Master -> `ready=true`
-- true unknown -> internal recovery -> `ai-estimate` -> `ready=true`
-- user package P/F/C -> `user-label` -> derived kcal when needed -> `ready=true`
-- kcal/P/F/C preview in Live cards
-- Register gate tied to Draft readiness
-- browser Back -> Live cleanup -> microphone track stop
-- no automatic `visibilitychange` shutdown
-- production entrypoint uses only v1.7.19 Live runtime
-
-CI success is still not a substitute for Android real-device verification.
-
-## Immediate Android verification after v1.7.19 deploy
-
-Test the flow, not isolated controls:
-
-1. Confirm visible `v1.7.19`.
-2. Start Live and say `ポテト（L）`.
-3. Even if Gemini initially only answers verbally, confirm a `ポテト(L)` card appears.
-4. Confirm the card shows amount plus kcal/P/F/C and becomes `登録できます`.
-5. Confirm `これで登録する` is enabled and saves the displayed values.
-6. Start another Live session and say a genuinely unregistered product such as `サムライマック`.
-7. Confirm it does not remain permanently unresolved; it should become `AI推定・目安` with kcal/P/F/C and become registerable.
-8. Test a package readout such as `このカツ丼、P18.5、F24、C82` and confirm those values are preserved as `パッケージ・表示値`.
-9. Start Live again and press Android/browser Back instead of `ライブを終了`.
-10. Confirm the app returns to its home surface and the microphone indicator turns off so another app can immediately acquire the mic.
+CI success is not a substitute for Android real-device verification, but all changed runtime/source-order/search-contract paths must pass CI before merge.

@@ -1,6 +1,6 @@
-import { GAS_URL } from './config-v1720.js?v=1.7.20';
+import { GAS_URL } from './config-v1720.js?v=1.7.21';
 
-export const NUTRITION_LOOKUP_VERSION='v1.7.20';
+export const NUTRITION_LOOKUP_VERSION='v1.7.21';
 export const NUTRITION_LOOKUP_MODEL='gemini-2.5-flash';
 export const NUTRITION_LOOKUP_TIMEOUT_MS=12000;
 export const NUTRITION_LOOKUP_CACHE_TTL_MS=30*24*60*60*1000;
@@ -10,8 +10,9 @@ function text(v){return String(v??'').trim()}
 function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
 function round1(v){return Math.round(Number(v)*10)/10}
 function normalizeKeyPart(v){return text(v).normalize('NFKC').toLowerCase().replace(/\s+/g,' ').trim()}
-export function nutritionLookupCacheKey({foodName='',contextText=''}={}){
-  return `${normalizeKeyPart(foodName)}|${normalizeKeyPart(contextText)}`;
+export function nutritionLookupCacheKey({foodName='',contextText='',candidateNames=[]}={}){
+  const candidates=(Array.isArray(candidateNames)?candidateNames:[]).map(normalizeKeyPart).filter(Boolean).join(' / ');
+  return `${normalizeKeyPart(foodName)}|${normalizeKeyPart(contextText)}|${candidates}`;
 }
 
 function readCache(){
@@ -52,6 +53,8 @@ export function validateGroundedNutrition(raw={}){
     sourceDomain:text(raw.sourceDomain),
     model:text(raw.model)||NUTRITION_LOOKUP_MODEL,
     verifiedAt:text(raw.verifiedAt)||new Date().toISOString(),
+    resolutionNote:text(raw.resolutionNote),
+    gasBuild:text(raw.gasBuild),
     webSearchQueries:Array.isArray(raw.webSearchQueries)?raw.webSearchQueries.map(text).filter(Boolean).slice(0,8):[]
   };
 }
@@ -80,7 +83,7 @@ export async function lookupOfficialNutrition(input,{force=false}={}){
     const rawText=await response.text();let body;
     try{body=JSON.parse(rawText)}catch{throw new Error('nutrition lookup response is not JSON')}
     if(body?.ok===false)throw new Error(text(body?.message)||text(body?.error)||'nutrition lookup failed');
-    if(text(body?.status)!=='verified')return {status:text(body?.status)||'not_found',message:text(body?.message),model:text(body?.model)||NUTRITION_LOOKUP_MODEL};
+    if(text(body?.status)!=='verified')return {status:text(body?.status)||'not_found',message:text(body?.message),model:text(body?.model)||NUTRITION_LOOKUP_MODEL,gasBuild:text(body?.gasBuild),webSearchQueries:Array.isArray(body?.webSearchQueries)?body.webSearchQueries.map(text).filter(Boolean).slice(0,8):[]};
     const result=validateGroundedNutrition(body);cacheResult(key,result);return {...result,cacheHit:false};
   }catch(error){
     if(error?.name==='AbortError')throw new Error('nutrition lookup timed out');

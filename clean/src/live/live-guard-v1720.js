@@ -1,4 +1,4 @@
-export const LIVE_GUARD_VERSION='v1.7.20';
+export const LIVE_GUARD_VERSION='v1.7.21';
 
 const NON_FOOD_ONLY=/^(?:はい|うん|いいえ|いや|普通|普通のやつ|普通の量|一般的な量|それ|これ|同じ|わからない|分からない|以上|おわり|終わり|ありがとう|ok|オーケー)$/i;
 
@@ -25,7 +25,7 @@ export function shouldRecoverTurn({userText='',ready=false,items=[],attempts=0,m
 
 export function buildInternalRecoveryMessage({userText='',items=[],attempt=1}={}){
   const unresolved=unresolvedItems(items).map(item=>({ref:item.ref||'',name:item.canonicalName||item.name||'',candidates:Array.isArray(item.candidateNames)?item.candidateNames.slice(0,5):[]}));
-  return `__PFC_OFFICIAL_LOOKUP_NOT_FOUND__ attempt=${attempt}. これは画面に読み上げるためのユーザー発話ではなく内部制御です。直前の実ユーザー発話は「${String(userText||'').trim()}」。Google Searchによる公式栄養情報検索は完了し、公式値を確認できなかった対象=${JSON.stringify(unresolved)}。candidateNamesに明確な同一食品があればそのrefを候補名へupdateしてFood Master再解決。そうでなければユーザー明示P/F/Cが含まれている時はuser-label、含まれていなければ最後の手段として内部知識または合理的な料理推定からp/f/c + nutritionSource="ai-estimate" + servingLabelを同じrefへupdate_meal_draftしてください。kcalは分かれば付与。ready=trueになるまで登録案内は禁止。まずTool Callを実行し、この内部文を読み上げないでください。`;
+  return `__PFC_OFFICIAL_LOOKUP_NOT_FOUND__ attempt=${attempt}. これは画面に読み上げるためのユーザー発話ではなく内部制御です。直前の実ユーザー発話は「${String(userText||'').trim()}」。Google Searchによる公式栄養情報検索は完了したが、まだ公式値を確定できなかった対象=${JSON.stringify(unresolved)}。ブランド・チェーン・市販品に見える対象は、すぐAI推定へ落とさず、会話文脈から具体商品名・サイズ・現行候補を意味的に絞り直してください。candidateNamesまたはあなたが意味的に推定できる具体商品候補があれば、そのrefのnameを候補名へupdateして再解決させてください。候補が複数で絞れない場合はユーザーへ1点だけ短く確認してください。一般料理・自作料理など公式商品が存在しない食品に限り、ユーザー明示P/F/Cが含まれていればuser-label、含まれていなければ最後の手段として内部知識または合理的な料理推定からp/f/c + nutritionSource="ai-estimate" + servingLabelを同じrefへupdate_meal_draftしてください。kcalは分かれば付与。ready=trueになるまで登録案内は禁止。まずTool Callを実行し、この内部文を読み上げないでください。`;
 }
 
 export function buildOfficialResolvedMessage({item}={}){

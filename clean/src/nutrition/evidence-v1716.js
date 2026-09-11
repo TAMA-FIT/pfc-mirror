@@ -32,11 +32,12 @@ export function normalizeNutritionEvidence(raw={}) {
 export function chooseNutritionMode(item={}) {
   const ev=item.nutritionEvidence||null;
   if(ev?.sourceType==='user-label')return {mode:'evidence',evidence:ev};
+  if(ev?.sourceType==='official-web')return {mode:'evidence',evidence:ev};
   if(item.foodId){
     if(!item.unresolved&&!item.needsSkin&&!item.needsAmount&&Number(item.amount)>0)return {mode:'trusted-db',evidence:null};
     return {mode:'pending',evidence:null};
   }
-  if(ev?.sourceType==='official-web'||ev?.sourceType==='ai-estimate')return {mode:'evidence',evidence:ev};
+  if(ev?.sourceType==='ai-estimate')return {mode:'evidence',evidence:ev};
   return {mode:'pending',evidence:null};
 }
 
