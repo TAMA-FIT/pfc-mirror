@@ -181,13 +181,13 @@ jobs:
           console.log('Browser-back mic release remains intact: OK');
           NODE
 
-      - name: Production wiring uses v1.7.21
+      - name: Production wiring keeps v1.7.21 runtime with v1.7.22 cache bust
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
-          assert.match(entry,/live-v1720\.js\?v=1\.7\.21/);
+          assert.match(entry,/live-v1720\.js\?v=1\.7\.22/);
           assert.doesNotMatch(entry,/live-v1719\.js/);
           const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
           assert.match(live,/config-v1720\.js\?v=1\.7\.21/);
@@ -197,7 +197,7 @@ jobs:
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
             assert.match(html,/v1\.7\.21/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.21/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.22/);
           }
-          console.log('v1.7.21 production wiring: OK');
+          console.log('v1.7.21 runtime with v1.7.22 cache bust: OK');
           NODE
