@@ -1,14 +1,16 @@
-import { GAS_URL } from './config-v1720.js?v=1.7.25';
+import { GAS_URL } from './config-v1720.js?v=1.7.26';
 
-export const NUTRITION_LOOKUP_VERSION='v1.7.25-tavily';
+export const NUTRITION_LOOKUP_VERSION='v1.7.26-tavily-serial';
 export const NUTRITION_LOOKUP_MODEL='Tavily + Gemini 3.1 Flash Lite';
-export const NUTRITION_LOOKUP_TIMEOUT_MS=22000;
+export const NUTRITION_LOOKUP_TIMEOUT_MS=30000;
 export const NUTRITION_LOOKUP_CACHE_TTL_MS=30*24*60*60*1000;
 const CACHE_KEY='pfc-official-nutrition-cache-v2';
 const LOOKUP_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('lookupDebug')==='1';
-const LOOKUP_DIAG_MAX=18;
+const LOOKUP_DIAG_MAX=24;
+const LOOKUP_QUEUE_GAP_MS=180;
 const lookupDiagnostics=[];
 const lookupDiagnosticListeners=new Set();
+let lookupQueue=Promise.resolve();
 
 function text(v){return String(v??'').trim()}
 function num(v){const n=Number(v);return Number.isFinite(n)?n:null}
@@ -52,9 +54,7 @@ function diagnosticCopyRows(){
 function emitLookupDiagnostics(){
   if(!LOOKUP_DEBUG)return;
   const snapshot=getLookupDiagnostics();
-  for(const listener of [...lookupDiagnosticListeners]){
-    try{listener(snapshot)}catch{}
-  }
+  for(const listener of [...lookupDiagnosticListeners]){try{listener(snapshot)}catch{}}
 }
 function addLookupDiagnostic({foodName='',candidateNames=[],stage='',elapsedMs=null,body=null,summary=''}={}){
   if(!LOOKUP_DEBUG)return;
@@ -71,9 +71,7 @@ function addLookupDiagnostic({foodName='',candidateNames=[],stage='',elapsedMs=n
 
 export function isLookupDebugEnabled(){return LOOKUP_DEBUG}
 export function getLookupDiagnostics(){return lookupDiagnostics.map(r=>({...r,candidates:[...(r.candidates||[])]}))}
-export function formatLookupDiagnosticsText(){
-  return [`PFC lookup diagnostics ${NUTRITION_LOOKUP_VERSION}`,...diagnosticCopyRows()].join('\n');
-}
+export function formatLookupDiagnosticsText(){return [`PFC lookup diagnostics ${NUTRITION_LOOKUP_VERSION}`,...diagnosticCopyRows()].join('\n')}
 export function clearLookupDiagnostics(){lookupDiagnostics.length=0;emitLookupDiagnostics()}
 export function setLookupDiagnosticListener(listener){
   if(typeof listener!=='function')return ()=>{};
@@ -94,7 +92,7 @@ function explicitServingToken(v){
 function aliasSafeForResult(alias,result){
   const a=normalizeKeyPart(alias);if(a.length<2)return false;
   const servingToken=explicitServingToken(result?.servingLabel);
-  if(servingToken&&!normalizeKeyPart(alias).includes(servingToken))return false;
+  if(servingToken&&!a.includes(servingToken))return false;
   return true;
 }
 function readCache(){
@@ -203,33 +201,88 @@ function publicNotFound(body,errorCode){
     webSearchQueries:Array.isArray(body?.webSearchQueries)?body.webSearchQueries.map(text).filter(Boolean).slice(0,8):[]
   };
 }
-
-export async function lookupOfficialNutrition(input,{force=false}={}){
-  const payload=buildNutritionLookupPayload(input);
-  if(!force){
-    const hit=cachedResult(payload);
-    if(hit){addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'cache-hit',elapsedMs:0,body:hit});return {...hit,cacheHit:true}}
-  }
-
+function pickSpecificCandidate(payload){
+  const original=normalizeKeyPart(payload.foodName);
+  const candidates=[...(payload.candidateNames||[])]
+    .map(text)
+    .filter(Boolean)
+    .filter((v,i,a)=>a.indexOf(v)===i)
+    .filter(v=>normalizeKeyPart(v)!==original)
+    .filter(v=>!/^(s|m|l|普通|定番|いつもの|ポテト|バーガー|ドリンク)$/i.test(normalizeKeyPart(v)))
+    .sort((a,b)=>b.length-a.length);
+  return candidates[0]||'';
+}
+function candidateRetryPayload(payload){
+  const candidate=pickSpecificCandidate(payload);
+  if(!candidate)return null;
+  const names=[candidate,payload.foodName,...(payload.candidateNames||[])]
+    .map(text).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).slice(0,5);
+  return {
+    ...payload,
+    foodName:candidate.slice(0,120),
+    contextText:[payload.contextText,`正式候補再検索: ${candidate}`].filter(Boolean).join(' / ').slice(0,240),
+    candidateNames:names
+  };
+}
+function shouldCandidateRetry(errorCode,body){
+  if(text(body?.status)==='verified')return false;
+  return errorCode==='NOT_FOUND'||errorCode==='OFFICIAL_URL_404';
+}
+function enqueueLookup(task,{foodName='',candidateNames=[]}={}){
+  addLookupDiagnostic({foodName,candidateNames,stage:'queued',summary:'直列キューへ追加。前の公式検索が終わってから開始します。'});
+  const run=lookupQueue.then(task,task);
+  lookupQueue=run.catch(()=>{}).then(()=>sleep(LOOKUP_QUEUE_GAP_MS));
+  return run;
+}
+async function resolveLookupMiss(payload){
   let first;
   try{first=await performRequest(payload,{attempt:1,label:'primary'})}
   catch(error){
     if(error.lookupCode==='NETWORK_OR_CLIENT'){
-      await sleep(350);
+      await sleep(450);
       first=await performRequest(payload,{attempt:2,label:'network-retry'});
     }else throw error;
   }
 
-  const {response,body,errorCode}=first;
+  let {response,body,errorCode}=first;
   if(!response.ok)throw new Error(`nutrition lookup GAS HTTP ${response.status}`);
   if(body?.ok===false){
     const error=new Error(text(body?.message)||text(body?.error)||'nutrition lookup failed');
     error.lookupCode=errorCode||'UPSTREAM_ERROR';throw error;
   }
-  if(text(body?.status)!=='verified')return publicNotFound(body,errorCode);
 
+  if(text(body?.status)!=='verified'&&shouldCandidateRetry(errorCode,body)){
+    const retryPayload=candidateRetryPayload(payload);
+    if(retryPayload){
+      addLookupDiagnostic({
+        foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'candidate-retry',
+        summary:`より具体的な候補「${sanitize(retryPayload.foodName,100)}」で1回だけ再検索`
+      });
+      const retry=await performRequest(retryPayload,{attempt:1,label:'candidate-retry'});
+      if(!retry.response.ok)throw new Error(`nutrition lookup GAS HTTP ${retry.response.status}`);
+      if(retry.body?.ok===false){
+        const error=new Error(text(retry.body?.message)||text(retry.body?.error)||'nutrition lookup failed');
+        error.lookupCode=retry.errorCode||'UPSTREAM_ERROR';throw error;
+      }
+      response=retry.response;body=retry.body;errorCode=retry.errorCode;
+    }
+  }
+
+  if(text(body?.status)!=='verified')return publicNotFound(body,errorCode);
   const result=validateGroundedNutrition(body);
   cacheResult(payload,result);
   addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'verified',body:{...body,clientHttpStatus:response.status,errorCode:''}});
   return {...result,cacheHit:false};
+}
+
+export async function lookupOfficialNutrition(input,{force=false}={}){
+  const payload=buildNutritionLookupPayload(input);
+  if(!force){
+    const hit=cachedResult(payload);
+    if(hit){
+      addLookupDiagnostic({foodName:payload.foodName,candidateNames:payload.candidateNames,stage:'cache-hit',elapsedMs:0,body:hit});
+      return {...hit,cacheHit:true};
+    }
+  }
+  return enqueueLookup(()=>resolveLookupMiss(payload),payload);
 }
