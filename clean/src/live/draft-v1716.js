@@ -11,7 +11,6 @@ const ALLOWED = new Set([
   'p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel'
 ]);
 const EVIDENCE_FIELDS = new Set(['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']);
-const LIVE_INTERNAL_SEND_HOOK='__PFC_LIVE_INTERNAL_SEND__';
 
 function own(o, k) { return Object.prototype.hasOwnProperty.call(o, k); }
 function text(v) { return String(v ?? '').trim(); }
@@ -193,21 +192,6 @@ function publicItem(item) {
     ...(item.candidateNames?.length ? {candidateNames:[...item.candidateNames]} : {})
   };
 }
-function officialTruthMessage(item){
-  const ev=item?.nutritionEvidence;if(ev?.sourceType!=='official-web')return '';
-  const name=text(item.canonicalName||item.name||'食品');
-  return `__PFC_OFFICIAL_RESULT_SYNC__ ref=${text(item.ref)} product=${name} serving=${text(ev.servingLabel)} kcal=${Number(ev.kcal)||0} P=${Number(ev.p)||0} F=${Number(ev.f)||0} C=${Number(ev.c)||0} source=${text(ev.sourceLabel||'公式情報')}。この数値はGoogle検索経路で検証され、同じ値がアプリのカードへ反映済みです。これを唯一の正本として扱い、再推論・補完・変更しないでください。他の未確定項目が残る場合はこの項目だけ確認済みとして扱い、数値を言い直さず残りの確認を続けてください。`;
-}
-function syncOfficialTruth(items,ready){
-  if(ready||!items?.length)return;
-  const send=globalThis?.[LIVE_INTERNAL_SEND_HOOK];if(typeof send!=='function')return;
-  const seen=new Set();
-  for(const item of items){
-    if(!item?.ref||seen.has(item.ref))continue;seen.add(item.ref);
-    const message=officialTruthMessage(item);if(!message)continue;
-    try{send(message)}catch{}
-  }
-}
 
 export class LiveMealDraft {
   constructor() {
@@ -225,11 +209,10 @@ export class LiveMealDraft {
     const callId = text(call?.id);
     const operations = validateArgs(call?.args || {});
     const before = this.snapshot();
-    const officialApplied=[];
 
     for (const op of operations) {
       if (op.op === 'add') {
-        const added=resolveItem({
+        this.items.push(resolveItem({
           ref: nextRef(),
           name: text(op.name),
           amount: own(op,'amount') ? op.amount : null,
@@ -237,9 +220,7 @@ export class LiveMealDraft {
           meal: op.meal || autoMeal(),
           variant: normalizeChickenVariant(op.variant),
           nutritionEvidence:op.nutritionEvidence||null
-        });
-        this.items.push(added);
-        if(op.nutritionEvidence?.sourceType==='official-web')officialApplied.push(added);
+        }));
         continue;
       }
 
@@ -265,13 +246,10 @@ export class LiveMealDraft {
       if (own(op,'variant')) next.variant=normalizeChickenVariant(op.variant);
       if (op.nutritionEvidence) next.nutritionEvidence=op.nutritionEvidence;
       this.items[index]=resolveItem(next);
-      if(op.nutritionEvidence?.sourceType==='official-web')officialApplied.push(this.items[index]);
     }
 
     this.mutationSeq += 1;
     if (callId) this.callSnapshots.set(callId, {before, appliedSeq:this.mutationSeq});
-    const ready=this.isReady();
-    syncOfficialTruth(officialApplied,ready);
     return this.toolResult();
   }
   cancelCall(id) {
