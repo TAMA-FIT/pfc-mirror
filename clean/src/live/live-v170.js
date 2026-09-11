@@ -1,6 +1,6 @@
 import { readState, writeRecords } from '../storage.js';
 import { buildRecord, formatAmount } from '../nutrition/engine.js';
-import { LIVE_VERSION } from './config-v170.js?v=1.7.12';
+import { LIVE_VERSION } from './config-v170.js?v=1.7.13';
 import { LiveMealDraft } from './draft-v170.js';
 import { GeminiLiveTransport } from './transport-v170.js?v=1.7.8';
 import { GeminiLiveTranscriber, TRANSCRIBE_MODEL } from './transcribe-v178.js?v=1.7.8';
@@ -10,6 +10,7 @@ import { mergeTranscriptFragment } from './transcript-v177.js?v=1.7.8';
 const draft=new LiveMealDraft();
 const LIVE_DEBUG=new URLSearchParams(globalThis.location?.search||'').get('liveDebug')==='1';
 const TRANSCRIBER_START_DELAY_MS=120;
+const LIVE_MUTE_STORAGE_KEY='pfc-live-ai-muted-v1';
 let transport=null;
 let transcriber=null;
 let transcriberReady=false;
@@ -32,8 +33,21 @@ let lastAudioArrivalMs=0;
 let audioBurstCount=0;
 let audioChunkCount=0;
 let diagnosticReplayActive=false;
+let aiMuted=readAiMuted();
 
 function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]))}
+function readAiMuted(){
+  try{return localStorage.getItem(LIVE_MUTE_STORAGE_KEY)==='1'}catch{return false}
+}
+function writeAiMuted(value){
+  try{localStorage.setItem(LIVE_MUTE_STORAGE_KEY,value?'1':'0')}catch{}
+}
+function setAiMuted(value){
+  aiMuted=!!value;
+  writeAiMuted(aiMuted);
+  if(aiMuted)audio?.interruptOutput?.();
+  render();
+}
 function statusText(){
   if(errorText)return errorText;
   if(sessionState==='token')return '接続の準備をしています…';
@@ -97,7 +111,7 @@ function loadCss(){
   const link=document.createElement('link');
   link.id='pfc-live-v170-css';
   link.rel='stylesheet';
-  link.href=new URL('../../assets/live-v170.css?v=1.7.8',import.meta.url).href;
+  link.href=new URL('../../assets/live-v170.css?v=1.7.13',import.meta.url).href;
   document.head.appendChild(link);
 }
 
@@ -142,6 +156,12 @@ function render(){
     </div>
     <div class="sv4-body">
       <div class="pfc-live-status">${esc(statusText())}</div>
+      <div class="pfc-live-audio-setting">
+        <div><strong>AI音声をミュート</strong><small>文字起こしと入力ガイドはそのまま使えます</small></div>
+        <button type="button" class="pfc-live-mute-switch ${aiMuted?'on':''}" data-live-action="toggle-mute" role="switch" aria-checked="${aiMuted?'true':'false'}" aria-label="AI音声をミュート">
+          <span class="pfc-live-switch-track"><i></i></span><b>${aiMuted?'ON':'OFF'}</b>
+        </button>
+      </div>
       ${LIVE_DEBUG&&diagnosticText?`<div class="pfc-live-diagnostic"><strong>診断</strong><span>${esc(diagnosticText)}</span></div>`:''}
       ${LIVE_DEBUG&&transcribeDiagnosticText?`<div class="pfc-live-diagnostic"><strong>文字起こし</strong><span>${esc(transcribeDiagnosticText)}</span></div>`:''}
       ${traceSummary?`<div class="pfc-live-diagnostic"><strong>音声イベント</strong><span>${esc(traceSummary)}</span></div>`:''}
@@ -180,8 +200,13 @@ function patchHome(){
   const home=document.getElementById('view-home');
   if(!home||home.hidden)return;
   const talk=home.querySelector('.senior-talk-btn');
-  if(!talk||home.querySelector('.senior-live-btn'))return;
-  talk.insertAdjacentHTML('afterend',`<button class="senior-live-btn" data-live-action="start"><span class="live-icon">◉</span><span><strong>ライブ会話</strong><small>AIとそのまま話して記録</small></span></button>`);
+  if(!talk)return;
+  for(const extra of home.querySelectorAll('.senior-live-btn'))if(extra!==talk)extra.remove();
+  if(talk.dataset.liveAction==='start')return;
+  talk.removeAttribute('data-action');
+  talk.dataset.liveAction='start';
+  talk.classList.add('senior-live-btn');
+  talk.innerHTML='<span class="live-icon">🎙</span><span><strong>話して記録</strong><small>AIと会話しながら、そのまま記録</small></span>';
 }
 
 function queuePatch(){
@@ -305,7 +330,7 @@ async function startLive(){
         render();
       },
       onDiagnostic:d=>{const text=formatDiagnostic(d);if(text)diagnosticText=text;if(LIVE_DEBUG)render()},
-      onAudio:(data,mime)=>{if(!diagnosticReplayActive)audio?.play(data,mime)},
+      onAudio:(data,mime)=>{if(!diagnosticReplayActive&&!aiMuted)audio?.play(data,mime)},
       onInputTranscript:t=>{if(!transcriberReady)acceptInputTranscript(t)},
       onOutputTranscript:acceptOutputTranscript,
       onToolCall:handleToolCalls,
@@ -403,6 +428,7 @@ document.addEventListener('click',e=>{
   if(action==='start'){e.preventDefault();startLive()}
   else if(action==='end'){e.preventDefault();endLive()}
   else if(action==='register'){e.preventDefault();registerDraft()}
+  else if(action==='toggle-mute'){e.preventDefault();setAiMuted(!aiMuted)}
   else if(action==='replay-pcm'){e.preventDefault();replayRawPcm()}
   else if(action==='replay-pcm-chunked'){e.preventDefault();replayChunkedPcm()}
   else if(action==='remove'){e.preventDefault();draft.removeLocal(button.dataset.ref);render()}
