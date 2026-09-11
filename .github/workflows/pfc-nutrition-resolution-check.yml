@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'clean/src/live/*v1716.js'
+      - 'clean/src/live/free-tier-search-hotfix-v1717.js'
       - 'clean/src/nutrition/evidence-v1716.js'
       - 'clean/src/ui-polish-v1716.js'
       - 'clean/assets/ui-polish-v1716.css'
@@ -27,6 +28,7 @@ jobs:
           node --check clean/src/live/draft-v1716.js
           node --check clean/src/live/transport-v1716.js
           node --check clean/src/live/live-v1716.js
+          node --check clean/src/live/free-tier-search-hotfix-v1717.js
           node --check clean/src/nutrition/evidence-v1716.js
           node --check clean/src/ui-polish-v1716.js
       - name: Gemini Live search and schema contract
@@ -108,7 +110,8 @@ jobs:
           const entry=fs.readFileSync('./clean/src/main-v160.js','utf8');
           const live=fs.readFileSync('./clean/src/live/live-v1716.js','utf8');
           const ui=fs.readFileSync('./clean/src/ui-polish-v1716.js','utf8');
-          assert.match(entry,/live-v1716\.js\?v=1\.7\.16/);
+          assert.match(entry,/free-tier-search-hotfix-v1717\.js\?v=1\.7\.17/);
+          assert.match(entry,/live-v1716\.js\?v=1\.7\.17/);
           assert.match(entry,/ui-polish-v1716\.js\?v=1\.7\.16/);
           assert.match(live,/buildEvidenceRecord/);
           assert.match(live,/record\._clean\.displayAmount=item\.standardLabel/);
@@ -117,8 +120,8 @@ jobs:
           assert.match(ui,/record-source-badge/);
           for(const path of ['index.html','clean/index.html']){
             const html=fs.readFileSync(path,'utf8');
-            assert.match(html,/v1\.7\.16/);
-            assert.match(html,/main-v160\.js\?v=1\.7\.16/);
+            assert.match(html,/v1\.7\.17/);
+            assert.match(html,/main-v160\.js\?v=1\.7\.17/);
           }
           console.log('Runtime wiring/UI transparency: OK');
           NODE
