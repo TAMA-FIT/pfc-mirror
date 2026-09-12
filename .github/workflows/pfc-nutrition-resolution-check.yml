@@ -3,15 +3,12 @@ name: PFC nutrition resolution check
 on:
   pull_request:
     paths:
+      - 'clean/src/data/foods.js'
+      - 'clean/src/nutrition/catalog.js'
       - 'clean/src/live/config-v1720.js'
       - 'clean/src/live/draft-v1716.js'
       - 'clean/src/live/generic-fallback-v1727.js'
-      - 'clean/src/live/live-v1720.js'
-      - 'clean/src/live/live-guard-v1720.js'
-      - 'clean/src/live/nutrition-lookup-v1720.js'
       - 'clean/src/nutrition/evidence-v1716.js'
-      - 'clean/src/ui-polish-v1716.js'
-      - 'clean/src/main-v160.js'
       - 'clean/index.html'
       - 'index.html'
       - '.github/workflows/pfc-nutrition-resolution-check.yml'
@@ -26,143 +23,86 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Syntax check current nutrition runtime
+      - name: Syntax check MEXT-grounded runtime
         run: |
+          node --check clean/src/data/foods.js
+          node --check clean/src/nutrition/catalog.js
           node --check clean/src/live/config-v1720.js
           node --check clean/src/live/draft-v1716.js
           node --check clean/src/live/generic-fallback-v1727.js
-          node --check clean/src/live/live-v1720.js
-          node --check clean/src/live/live-guard-v1720.js
-          node --check clean/src/live/nutrition-lookup-v1720.js
           node --check clean/src/nutrition/evidence-v1716.js
-          node --check clean/src/ui-polish-v1716.js
 
-      - name: Gemini Live semantic-to-Tavily nutrition contract
+      - name: Gemini Live MEXT-grounded policy contract
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1720.js';
-          assert.equal(LIVE_VERSION,'v1.7.25');
-          assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
+          import {SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1720.js';
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
           assert.equal(setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
-          assert.equal(JSON.stringify(setup.tools).includes('googleSearch'),false);
           const props=UPDATE_MEAL_DRAFT_DECLARATION.parametersJsonSchema.properties.operations.items.properties;
-          for(const key of ['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']) assert.ok(props[key]);
-          assert.deepEqual(props.nutritionSource.enum,['user-label','ai-estimate']);
-          assert.match(SYSTEM_INSTRUCTION,/Tavily検索 \+ Gemini 3\.1 Flash Lite抽出/);
-          assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
-          assert.match(SYSTEM_INSTRUCTION,/__PFC_OFFICIAL_RESULT_SYNC__/);
-          console.log('Gemini Live Tavily policy: OK');
+          assert.ok(props.components);
+          assert.deepEqual(props.nutritionSource.enum,['user-label']);
+          assert.match(SYSTEM_INSTRUCTION,/文部科学省/);
+          assert.match(SYSTEM_INSTRUCTION,/components/);
+          assert.match(SYSTEM_INSTRUCTION,/P\/F\/C\/kcalを生成してはいけません/);
+          assert.doesNotMatch(SYSTEM_INSTRUCTION,/Tavily公式検索/);
+          console.log('MEXT-grounded Live policy: OK');
           NODE
 
-      - name: Nutrition evidence precedence
+      - name: CoCoIchi maps to MEXT-grounded curry composition
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {normalizeNutritionEvidence,chooseNutritionMode,buildEvidenceRecord,NUTRITION_EVIDENCE_TYPES} from './clean/src/nutrition/evidence-v1716.js';
-          assert.ok(NUTRITION_EVIDENCE_TYPES.includes('trusted-fallback'));
-          const official=normalizeNutritionEvidence({nutritionSource:'official-web',p:7,f:25.2,c:66,kcal:517,servingLabel:'Lサイズ',sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/'});
-          const unknown={name:'マックフライポテト',foodId:null,unresolved:true,needsSkin:false,needsAmount:false,amount:null,meal:'昼',nutritionEvidence:official};
-          assert.equal(chooseNutritionMode(unknown).mode,'evidence');
-          const record=buildEvidenceRecord(unknown,123);
-          assert.equal(record.Cal,517);
-          assert.equal(record._clean.nutritionSource,'official-web');
-          const estimate=normalizeNutritionEvidence({nutritionSource:'ai-estimate',p:30,f:20,c:45,kcal:480,servingLabel:'1個'});
-          assert.equal(chooseNutritionMode({...unknown,nutritionEvidence:estimate,brandProduct:true}).mode,'pending');
-          const db={foodId:'food:1',unresolved:false,needsSkin:false,needsAmount:false,amount:1,unit:'個',meal:'昼',nutritionEvidence:estimate};
-          assert.equal(chooseNutritionMode(db).mode,'trusted-db');
-          console.log('Official/trusted fallback evidence precedence: OK');
-          NODE
-
-      - name: Branded product trusted generic fallback contract
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[
-            ['🍔ジャンク・菓子','カレーライス','かれーらいす カレー ごはん 米','並',12,25,100,750],
-            ['🍔ジャンク・菓子','カツカレー','かつかれー カレー ごはん 米 肉','並',25,45,120,1100],
-            ['🍔ジャンク・菓子','ハンバーガー','はんばーがー マック まっく バーガー パン 肉','1個',13,9,30,256],
-            ['🍔ジャンク・菓子','ポテト(L)','ぽてと マック まっく いも 芋','1個',6,25,65,517],
-            ['🍺酒・ジュース','コーヒー','こーひー 飲み物','1杯',0.2,0,0.7,4],
-            ['🍺酒・ジュース','コーラ','こーら ジュース 飲み物','1本',0,0,56,225]
-          ];
-          const fallback=await import('./clean/src/live/generic-fallback-v1727.js?test=1727');
-          const coco=fallback.buildTrustedGenericFallback('CoCo壱番屋 ポークカレー ライス300g 辛さ普通');
-          assert.ok(coco);
-          assert.equal(coco.genericName,'カレーライス');
-          assert.equal(coco.evidence.sourceType,'trusted-fallback');
-          assert.equal(coco.evidence.kcal,750);
-          assert.equal(fallback.buildTrustedGenericFallback('サムライマック 炙り醤油風 ダブル肉厚ビーフ'),null);
-
-          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1727');
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=1728');
           const draft=new LiveMealDraft();
-          let result=draft.applyFunctionCall({id:'add',args:{operations:[{op:'add',name:'CoCo壱番屋 ポークカレー ライス300g 辛さ普通'}]}});
-          assert.equal(result.ready,false);
-          const ref=result.draft[0].ref;
-          result=draft.applyFunctionCall({id:'estimate',args:{operations:[{op:'update',ref,p:15.8,f:20.9,c:103.4,kcal:728,nutritionSource:'ai-estimate',sourceLabel:'AI推定',servingLabel:'1皿'}]}});
+          const result=draft.applyFunctionCall({id:'coco',args:{operations:[{op:'add',name:'CoCo壱番屋 ポークカレー ライス300g 辛さ普通'}]}});
           assert.equal(result.ready,true);
-          assert.equal(result.draft[0].nutritionEvidence.sourceType,'trusted-fallback');
-          assert.equal(result.draft[0].nutritionEvidence.kcal,750);
-          assert.equal(result.draft[0].genericFallback.genericName,'カレーライス');
-
-          const special=new LiveMealDraft();
-          result=special.applyFunctionCall({id:'s1',args:{operations:[{op:'add',name:'サムライマック 炙り醤油風 ダブル肉厚ビーフ'}]}});
-          const specialRef=result.draft[0].ref;
-          assert.throws(()=>special.applyFunctionCall({id:'s2',args:{operations:[{op:'update',ref:specialRef,p:30,f:20,c:40,kcal:500,nutritionSource:'ai-estimate',sourceLabel:'AI推定',servingLabel:'1個'}]}}),/AI estimate is blocked/);
-          assert.equal(special.isReady(),false);
-          console.log('Branded generic fallback + special-product block: OK');
+          const item=result.draft[0];
+          assert.equal(item.nutritionEvidence.sourceType,'trusted-fallback');
+          assert.match(item.nutritionEvidence.sourceLabel,/文部科学省/);
+          assert.equal(item.nutritionEvidence.kcal,700);
+          assert.equal(item.nutritionEvidence.p,13.1);
+          assert.equal(item.nutritionEvidence.f,18.1);
+          assert.equal(item.nutritionEvidence.c,126.7);
+          assert.equal(item.genericFallback.sourceKind,'mext');
+          assert.deepEqual(item.genericFallback.components.map(x=>x.name),['白米','ポークカレー']);
+          console.log('CoCoIchi MEXT-grounded composition: OK');
           NODE
 
-      - name: Tavily serial lookup contract
+      - name: Raw AI PFC is rejected and MEXT component plan is accepted
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
+          const {LiveMealDraft}=await import('./clean/src/live/draft-v1716.js?test=components1728');
+          const blocked=new LiveMealDraft();
+          assert.throws(()=>blocked.applyFunctionCall({id:'bad',args:{operations:[{op:'add',name:'謎の料理',p:20,f:10,c:30,kcal:300,nutritionSource:'ai-estimate'}]}}),/raw AI nutrition estimates are disabled/);
+          const grounded=new LiveMealDraft();
+          const r=grounded.applyFunctionCall({id:'good',args:{operations:[{op:'add',name:'推定料理',components:[{name:'白米',amount:200,unit:'g'},{name:'豚ひき肉',amount:100,unit:'g'}]}]}});
+          assert.equal(r.ready,true);
+          assert.equal(r.draft[0].nutritionEvidence.sourceType,'trusted-fallback');
+          assert.match(r.draft[0].nutritionEvidence.sourceLabel,/文部科学省/);
+          assert.throws(()=>new LiveMealDraft().applyFunctionCall({id:'unknown',args:{operations:[{op:'add',name:'推定料理',components:[{name:'存在しない食品',amount:100,unit:'g'}]}]}}),/unknown\/non-MEXT/);
+          console.log('Raw AI blocked / MEXT component estimate: OK');
+          NODE
+
+      - name: MEXT source entries and cache bust are wired
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          globalThis.location={search:''};
-          globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
-          const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
-          const {nutritionLookupCacheKey,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_TIMEOUT_MS}=mod;
-          const a=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['ダブル肉厚ビーフ']});
-          const b=nutritionLookupCacheKey({foodName:'サムライマック',contextText:'普通のやつ',candidateNames:['たまごベーコン肉厚ビーフ']});
-          assert.notEqual(a,b);
-          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,30000);
-          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.26-tavily-serial');
-          assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
-          const src=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(src,/let lookupQueue=Promise\.resolve\(\)/);
-          assert.match(src,/candidate-retry/);
-          assert.match(src,/candidateRetryPayload/);
-          assert.match(src,/queued/);
-          assert.match(src,/network-retry/);
-          assert.match(src,/pfc-official-nutrition-cache-v2/);
-          assert.doesNotMatch(src,/upstream-retry/);
-          assert.doesNotMatch(src,/gemini-2\.5-flash/);
-          console.log('Tavily serial lookup contract: OK');
-          NODE
-
-      - name: Runtime wiring and fallback cache-bust
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
-          const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(live,/lookupOfficialNutrition/);
-          assert.match(live,/lookupFingerprint/);
-          assert.match(live,/official-stale/);
-          assert.match(live,/official-reset/);
-          assert.match(live,/nutritionSource:'official-web'/);
-          assert.match(lookup,/lookupDiagnosticListeners/);
-          assert.doesNotMatch(lookup,/document\.querySelector/);
-          const root=fs.readFileSync('index.html','utf8');
-          const clean=fs.readFileSync('clean/index.html','utf8');
-          assert.match(root,/nutrition-lookup-v1720\.js\?v=1\.7\.25":"\.\/clean\/src\/live\/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
-          assert.match(clean,/nutrition-lookup-v1720\.js\?v=1\.7\.25":"\.\/src\/live\/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
-          assert.match(root,/draft-v1716\.js\?v=1\.7\.24":"\.\/clean\/src\/live\/draft-v1716\.js\?v=1\.7\.27/);
-          assert.match(clean,/draft-v1716\.js\?v=1\.7\.24":"\.\/src\/live\/draft-v1716\.js\?v=1\.7\.27/);
-          assert.match(root,/evidence-v1716\.js\?v=1\.7\.24":"\.\/clean\/src\/nutrition\/evidence-v1716\.js\?v=1\.7\.27/);
-          assert.match(clean,/evidence-v1716\.js\?v=1\.7\.24":"\.\/src\/nutrition\/evidence-v1716\.js\?v=1\.7\.27/);
-          console.log('Runtime wiring + generic fallback cache-bust: OK');
+          globalThis.__PFC_CLEAN_BASE_FOOD_ROWS__=[];
+          const data=await import('./clean/src/data/foods.js?test=1728');
+          const byName=new Map(data.MEXT_ENTRIES.map(x=>[x.name,x]));
+          for(const name of ['ポークカレー','チキンカレー','ビーフカレー','フライドポテト(市販冷凍)']) assert.ok(byName.has(name));
+          assert.equal(byName.get('ポークカレー').source.itemNo,'18041');
+          for(const path of ['index.html','clean/index.html']){
+            const html=fs.readFileSync(path,'utf8');
+            assert.match(html,/catalog\.js\?v=1\.7\.28/);
+            assert.match(html,/config-v1720\.js\?v=1\.7\.28/);
+            assert.match(html,/draft-v1716\.js\?v=1\.7\.28/);
+          }
+          console.log('MEXT entries + cache bust: OK');
           NODE

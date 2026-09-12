@@ -1,14 +1,14 @@
 import { resolveFood, searchFoods, defaultAmount } from '../nutrition/catalog.js';
 import { autoMeal } from '../storage.js';
 import { normalizeNutritionEvidence, chooseNutritionMode } from '../nutrition/evidence-v1716.js?v=1.7.27';
-import { buildTrustedGenericFallback, isLikelyBrandProduct } from './generic-fallback-v1727.js';
+import { buildTrustedGenericFallback, buildMextComponentEstimate, isLikelyBrandProduct } from './generic-fallback-v1727.js?v=1.7.28';
 
 const FORBIDDEN = new Set([
   'P','F','C','A','a','cal','Cal','foodId','food_id',
   'canonicalId','canonical_id','nutrition','macros','protein','fat','carbs','carbohydrate'
 ]);
 const ALLOWED = new Set([
-  'op','ref','name','amount','unit','meal','variant',
+  'op','ref','name','amount','unit','meal','variant','components',
   'p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel'
 ]);
 const EVIDENCE_FIELDS = new Set(['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']);
@@ -55,6 +55,9 @@ function assertNoForbidden(value, path='args') {
 function nutritionEvidenceFromOp(op) {
   const hasEvidence=[...EVIDENCE_FIELDS].some(k=>own(op,k));
   if(!hasEvidence)return null;
+  if(text(op.nutritionSource)==='ai-estimate') {
+    throw new Error('raw AI nutrition estimates are disabled; use MEXT-grounded substitution instead');
+  }
   if(!own(op,'p')||!own(op,'f')||!own(op,'c')||!own(op,'nutritionSource')) {
     throw new Error('nutrition evidence requires p/f/c/nutritionSource together');
   }
@@ -65,6 +68,19 @@ function nutritionEvidenceFromOp(op) {
     sourceLabel:op.sourceLabel,
     sourceUrl:op.sourceUrl,
     servingLabel:op.servingLabel
+  });
+}
+
+function normalizeComponents(raw){
+  if(raw==null)return null;
+  if(!Array.isArray(raw)||!raw.length||raw.length>8)throw new Error('components must contain 1-8 MEXT food parts');
+  return raw.map((x,i)=>{
+    if(!x||typeof x!=='object'||Array.isArray(x))throw new Error(`components[${i}] invalid`);
+    if(Object.keys(x).some(k=>!['name','amount','unit'].includes(k)))throw new Error(`components[${i}] unsupported field`);
+    const name=text(x.name);const amount=Number(x.amount);const unit=text(x.unit)||'g';
+    if(!name)throw new Error(`components[${i}].name required`);
+    if(!Number.isFinite(amount)||amount<=0)throw new Error(`components[${i}].amount must be positive`);
+    return {name,amount,unit};
   });
 }
 
@@ -93,6 +109,7 @@ function validateArgs(raw) {
     }
     if (own(op,'meal') && !['朝','昼','晩','間食'].includes(text(op.meal))) throw new Error('invalid meal');
     const nutritionEvidence=nutritionEvidenceFromOp(op);
+    const components=normalizeComponents(op.components);
     return {
       op: kind,
       ...(ref ? {ref} : {}),
@@ -101,13 +118,13 @@ function validateArgs(raw) {
       ...(own(op,'unit') ? {unit:text(op.unit)} : {}),
       ...(own(op,'meal') ? {meal:text(op.meal)} : {}),
       ...(own(op,'variant') ? {variant:text(op.variant)} : {}),
+      ...(components ? {components} : {}),
       ...(nutritionEvidence ? {nutritionEvidence} : {})
     };
   });
 }
 
-function genericFallbackFor(name){
-  const hit=buildTrustedGenericFallback(name);
+function fallbackShape(hit){
   if(!hit)return null;
   return {
     nutritionEvidence:normalizeNutritionEvidence(hit.evidence),
@@ -117,16 +134,23 @@ function genericFallbackFor(name){
       genericName:hit.genericName,
       foodId:hit.foodId,
       sourceKind:hit.sourceKind,
-      sourceLabel:hit.sourceLabel
+      sourceLabel:hit.sourceLabel,
+      ...(hit.components?{components:clone(hit.components)}:{})
     },
     displayName:hit.originalName
   };
+}
+function genericFallbackFor(name){return fallbackShape(buildTrustedGenericFallback(name))}
+function componentFallbackFor(name,components){
+  const hit=buildMextComponentEstimate(name,components);
+  if(!hit)throw new Error('MEXT component plan contains an unknown/non-MEXT food or invalid amount');
+  return fallbackShape(hit);
 }
 
 function replaceBrandedAiEstimate(name,evidence){
   if(evidence?.sourceType!=='ai-estimate'||!isLikelyBrandProduct(name))return null;
   const fallback=genericFallbackFor(name);
-  if(!fallback)throw new Error('AI estimate is blocked for branded products; official data or a trusted generic Food Master fallback is required');
+  if(!fallback)throw new Error('AI estimate is blocked; MEXT-grounded substitution is required');
   return fallback;
 }
 
@@ -138,6 +162,7 @@ function nextRef() {
 
 function resolveItem(item) {
   const existingEvidence=item?.nutritionEvidence?clone(item.nutritionEvidence):null;
+  const stickyBrand=!!item?.brandProduct||isLikelyBrandProduct(item?.name)||isLikelyBrandProduct(item?.displayName);
   const base = {
     ...item,
     foodId: null,
@@ -149,7 +174,7 @@ function resolveItem(item) {
     candidateNames: [],
     standardLabel:'',
     nutritionEvidence:existingEvidence,
-    brandProduct:isLikelyBrandProduct(item?.name),
+    brandProduct:stickyBrand,
     genericFallback:item?.genericFallback?clone(item.genericFallback):null,
     displayName:text(item?.displayName)
   };
@@ -186,7 +211,7 @@ function resolveItem(item) {
   base.canonicalName = food.name;
   base.standardLabel = standardDisplayForFood(food);
   base.genericFallback=null;
-  base.displayName='';
+  if(!base.brandProduct)base.displayName='';
 
   if (base.amount == null) {
     if (food.criticalAmount) {
@@ -245,7 +270,10 @@ export class LiveMealDraft {
 
     for (const op of operations) {
       if (op.op === 'add') {
+        const componentFallback=op.components?componentFallbackFor(op.name,op.components):null;
+        const autoFallback=!op.nutritionEvidence&&!componentFallback?genericFallbackFor(op.name):null;
         const substituted=replaceBrandedAiEstimate(op.name,op.nutritionEvidence);
+        const fallback=componentFallback||substituted||autoFallback;
         this.items.push(resolveItem({
           ref: nextRef(),
           name: text(op.name),
@@ -253,9 +281,10 @@ export class LiveMealDraft {
           unit: text(op.unit),
           meal: op.meal || autoMeal(),
           variant: normalizeChickenVariant(op.variant),
-          nutritionEvidence:substituted?.nutritionEvidence||op.nutritionEvidence||null,
-          genericFallback:substituted?.genericFallback||null,
-          displayName:substituted?.displayName||''
+          nutritionEvidence:fallback?.nutritionEvidence||op.nutritionEvidence||null,
+          genericFallback:fallback?.genericFallback||null,
+          displayName:fallback?.displayName||'',
+          brandProduct:isLikelyBrandProduct(op.name)
         }));
         continue;
       }
@@ -276,7 +305,12 @@ export class LiveMealDraft {
         if (newName !== current.name) {
           next.nutritionEvidence=null;
           next.genericFallback=null;
-          next.displayName='';
+          if(current.brandProduct){
+            next.brandProduct=true;
+            next.displayName=current.displayName||current.name;
+          }else{
+            next.displayName='';
+          }
         }
         next.name=newName;
       }
@@ -284,8 +318,14 @@ export class LiveMealDraft {
       if (own(op,'unit')) next.unit=op.unit;
       if (own(op,'meal')) next.meal=op.meal;
       if (own(op,'variant')) next.variant=normalizeChickenVariant(op.variant);
-      if (op.nutritionEvidence) {
-        const substituted=replaceBrandedAiEstimate(next.name,op.nutritionEvidence);
+      if(op.components){
+        const fallback=componentFallbackFor(next.displayName||next.name,op.components);
+        next.nutritionEvidence=fallback.nutritionEvidence;
+        next.genericFallback=fallback.genericFallback;
+        next.displayName=fallback.displayName||next.displayName||next.name;
+        next.amount=null;next.unit='';
+      } else if (op.nutritionEvidence) {
+        const substituted=replaceBrandedAiEstimate(next.displayName||next.name,op.nutritionEvidence);
         if(substituted){
           next.nutritionEvidence=substituted.nutritionEvidence;
           next.genericFallback=substituted.genericFallback;
@@ -295,7 +335,15 @@ export class LiveMealDraft {
         }else{
           next.nutritionEvidence=op.nutritionEvidence;
           next.genericFallback=null;
-          next.displayName='';
+        }
+      } else if(next.brandProduct && !next.nutritionEvidence) {
+        const autoFallback=genericFallbackFor(next.displayName||next.name);
+        if(autoFallback){
+          next.nutritionEvidence=autoFallback.nutritionEvidence;
+          next.genericFallback=autoFallback.genericFallback;
+          next.displayName=autoFallback.displayName;
+          next.amount=null;
+          next.unit='';
         }
       }
       this.items[index]=resolveItem(next);
