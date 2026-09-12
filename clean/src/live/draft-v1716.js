@@ -1,14 +1,14 @@
 import { resolveFood, searchFoods, defaultAmount } from '../nutrition/catalog.js';
 import { autoMeal } from '../storage.js';
 import { normalizeNutritionEvidence, chooseNutritionMode } from '../nutrition/evidence-v1716.js?v=1.7.27';
-import { buildTrustedGenericFallback, isLikelyBrandProduct } from './generic-fallback-v1727.js?v=1.7.28';
+import { buildTrustedGenericFallback, buildMextComponentEstimate, isLikelyBrandProduct } from './generic-fallback-v1727.js?v=1.7.28';
 
 const FORBIDDEN = new Set([
   'P','F','C','A','a','cal','Cal','foodId','food_id',
   'canonicalId','canonical_id','nutrition','macros','protein','fat','carbs','carbohydrate'
 ]);
 const ALLOWED = new Set([
-  'op','ref','name','amount','unit','meal','variant',
+  'op','ref','name','amount','unit','meal','variant','components',
   'p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel'
 ]);
 const EVIDENCE_FIELDS = new Set(['p','f','c','kcal','nutritionSource','sourceLabel','sourceUrl','servingLabel']);
@@ -71,6 +71,19 @@ function nutritionEvidenceFromOp(op) {
   });
 }
 
+function normalizeComponents(raw){
+  if(raw==null)return null;
+  if(!Array.isArray(raw)||!raw.length||raw.length>8)throw new Error('components must contain 1-8 MEXT food parts');
+  return raw.map((x,i)=>{
+    if(!x||typeof x!=='object'||Array.isArray(x))throw new Error(`components[${i}] invalid`);
+    if(Object.keys(x).some(k=>!['name','amount','unit'].includes(k)))throw new Error(`components[${i}] unsupported field`);
+    const name=text(x.name);const amount=Number(x.amount);const unit=text(x.unit)||'g';
+    if(!name)throw new Error(`components[${i}].name required`);
+    if(!Number.isFinite(amount)||amount<=0)throw new Error(`components[${i}].amount must be positive`);
+    return {name,amount,unit};
+  });
+}
+
 function validateArgs(raw) {
   assertNoForbidden(raw);
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('tool args must be object');
@@ -96,6 +109,7 @@ function validateArgs(raw) {
     }
     if (own(op,'meal') && !['朝','昼','晩','間食'].includes(text(op.meal))) throw new Error('invalid meal');
     const nutritionEvidence=nutritionEvidenceFromOp(op);
+    const components=normalizeComponents(op.components);
     return {
       op: kind,
       ...(ref ? {ref} : {}),
@@ -104,13 +118,13 @@ function validateArgs(raw) {
       ...(own(op,'unit') ? {unit:text(op.unit)} : {}),
       ...(own(op,'meal') ? {meal:text(op.meal)} : {}),
       ...(own(op,'variant') ? {variant:text(op.variant)} : {}),
+      ...(components ? {components} : {}),
       ...(nutritionEvidence ? {nutritionEvidence} : {})
     };
   });
 }
 
-function genericFallbackFor(name){
-  const hit=buildTrustedGenericFallback(name);
+function fallbackShape(hit){
   if(!hit)return null;
   return {
     nutritionEvidence:normalizeNutritionEvidence(hit.evidence),
@@ -125,6 +139,12 @@ function genericFallbackFor(name){
     },
     displayName:hit.originalName
   };
+}
+function genericFallbackFor(name){return fallbackShape(buildTrustedGenericFallback(name))}
+function componentFallbackFor(name,components){
+  const hit=buildMextComponentEstimate(name,components);
+  if(!hit)throw new Error('MEXT component plan contains an unknown/non-MEXT food or invalid amount');
+  return fallbackShape(hit);
 }
 
 function replaceBrandedAiEstimate(name,evidence){
@@ -250,9 +270,10 @@ export class LiveMealDraft {
 
     for (const op of operations) {
       if (op.op === 'add') {
-        const autoFallback=!op.nutritionEvidence?genericFallbackFor(op.name):null;
+        const componentFallback=op.components?componentFallbackFor(op.name,op.components):null;
+        const autoFallback=!op.nutritionEvidence&&!componentFallback?genericFallbackFor(op.name):null;
         const substituted=replaceBrandedAiEstimate(op.name,op.nutritionEvidence);
-        const fallback=substituted||autoFallback;
+        const fallback=componentFallback||substituted||autoFallback;
         this.items.push(resolveItem({
           ref: nextRef(),
           name: text(op.name),
@@ -297,7 +318,13 @@ export class LiveMealDraft {
       if (own(op,'unit')) next.unit=op.unit;
       if (own(op,'meal')) next.meal=op.meal;
       if (own(op,'variant')) next.variant=normalizeChickenVariant(op.variant);
-      if (op.nutritionEvidence) {
+      if(op.components){
+        const fallback=componentFallbackFor(next.displayName||next.name,op.components);
+        next.nutritionEvidence=fallback.nutritionEvidence;
+        next.genericFallback=fallback.genericFallback;
+        next.displayName=fallback.displayName||next.displayName||next.name;
+        next.amount=null;next.unit='';
+      } else if (op.nutritionEvidence) {
         const substituted=replaceBrandedAiEstimate(next.displayName||next.name,op.nutritionEvidence);
         if(substituted){
           next.nutritionEvidence=substituted.nutritionEvidence;
