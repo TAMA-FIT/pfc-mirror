@@ -1,0 +1,43 @@
+name: MEXT full-table import diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/inspect_mext_xlsx.py'
+      - '.github/workflows/mext-full-import-check.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+      - name: Download official corrected MEXT main table
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3 --connect-timeout 20 \
+            'https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx' \
+            -o /tmp/mext.xlsx
+          python - <<'PY'
+          import zipfile
+          p='/tmp/mext.xlsx'
+          assert zipfile.is_zipfile(p), 'download is not an XLSX/ZIP'
+          print('official MEXT XLSX downloaded successfully')
+          PY
+      - name: Inspect workbook structure
+        run: |
+          mkdir -p tmp
+          python scripts/inspect_mext_xlsx.py /tmp/mext.xlsx > tmp/mext-layout.txt
+          sed -n '1,120p' tmp/mext-layout.txt
+      - name: Commit inspection snapshot to diagnostic branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tmp/mext-layout.txt
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Capture official MEXT workbook layout'
+          git push origin HEAD:${{ github.event.pull_request.head.ref }}
