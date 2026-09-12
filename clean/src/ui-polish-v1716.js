@@ -18,8 +18,8 @@ function sourceLabel(record){
   if(src==='Food Master')return 'Food Master';
   if(src==='user-label')return clean.sourceLabel||'パッケージ表示';
   if(src==='official-web')return clean.sourceLabel||'公式情報';
-  if(src==='trusted-fallback')return clean.sourceLabel||'標準食品データ代替';
-  if(src==='ai-estimate')return 'AI推定';
+  if(src==='trusted-fallback')return clean.sourceLabel||'文科省データベース推定';
+  if(src==='ai-estimate')return '旧AI推定';
   return '';
 }
 function patchVersion(){
@@ -56,7 +56,7 @@ function patchSourceNote(){
     if(!host||host.querySelector('.nutrition-source-note'))continue;
     const note=document.createElement('div');
     note.className='nutrition-source-note';
-    note.textContent='栄養データ：文部科学省「日本食品標準成分表」・Food Master・公式商品情報等を参照。公式商品が取れない場合は安全な一般食品データへ代替することがあります。AI推定は目安として表示します。';
+    note.textContent='栄養データ：文部科学省「日本食品標準成分表」を自動計算の基準にしています。外食・ブランド食品は近い標準食品または複数の構成食品へ置き換えて計算し、推定を含む場合は出典とともに表示します。';
     host.appendChild(note);
   }
 }
