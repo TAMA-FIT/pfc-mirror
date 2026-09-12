@@ -66,6 +66,20 @@ function evidenceFromParts(originalName,brandlessName,parts,note=''){
   };
 }
 
+export function buildMextComponentEstimate(originalName='',components=[]){
+  const raw=Array.isArray(components)?components:[];
+  if(!raw.length)return null;
+  const parts=raw.map(x=>{
+    const name=String(x?.name||'').trim();
+    const amount=Number(x?.amount);
+    const unit=String(x?.unit||'g').trim()||'g';
+    if(!name||!Number.isFinite(amount)||amount<=0)return null;
+    return component(name,amount,unit,true);
+  });
+  if(parts.some(x=>!x))return null;
+  return evidenceFromParts(String(originalName||'').trim(),String(originalName||'').trim(),parts,'文科省食品の構成・量をAIが推定');
+}
+
 function parseRiceGrams(raw){
   const s=String(raw||'').normalize('NFKC');
   const a=s.match(/(?:ライス|ごはん|御飯)\s*(\d+(?:\.\d+)?)\s*g/i);
@@ -112,16 +126,17 @@ export function buildTrustedGenericFallback(name=''){
 
   const curry=curryType(brandless);
   if(curry){
-    const riceGrams=parseRiceGrams(originalName)||300;
+    const givenRice=parseRiceGrams(originalName);
+    const riceGrams=givenRice||300;
     const parts=[
-      component('白米',riceGrams,'g',!parseRiceGrams(originalName)),
+      component('白米',riceGrams,'g',!givenRice),
       component(curry,200,'g',true)
     ];
     return evidenceFromParts(
       originalName,
       brandless,
       parts,
-      `白米${riceGrams}g + ${curry}200g（カレー量${parseRiceGrams(originalName)?'のみ':'・ライス量とも'}推定を含む）`
+      `白米${riceGrams}g + ${curry}200g（${givenRice?'カレー量':'ライス量・カレー量'}に推定を含む）`
     );
   }
 
@@ -135,7 +150,6 @@ export function buildTrustedGenericFallback(name=''){
     );
   }
 
-  // Conservative exact aliases only. If no safe MEXT proxy exists, stay unresolved.
   const exactMap=new Map([
     [normalize('ポークカレー'),'ポークカレー'],
     [normalize('チキンカレー'),'チキンカレー'],
