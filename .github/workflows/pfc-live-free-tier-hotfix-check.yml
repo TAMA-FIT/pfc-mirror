@@ -1,11 +1,14 @@
-name: PFC Live v1.7.25 Tavily truth-sync check
+name: PFC Live v1.7.28 MEXT-grounded check
 
 on:
   pull_request:
     paths:
+      - 'clean/src/data/foods.js'
       - 'clean/src/live/config-v1720.js'
+      - 'clean/src/live/draft-v1716.js'
+      - 'clean/src/live/generic-fallback-v1727.js'
       - 'clean/src/live/live-guard-v1720.js'
-      - 'clean/src/live/nutrition-lookup-v1720.js'
+      - 'clean/src/live/nutrition-lookup-mext-v1728.js'
       - 'clean/src/live/live-v1720.js'
       - 'clean/src/main-v160.js'
       - 'clean/index.html'
@@ -24,96 +27,80 @@ jobs:
 
       - name: Syntax check runtime
         run: |
+          node --check clean/src/data/foods.js
           node --check clean/src/live/config-v1720.js
+          node --check clean/src/live/draft-v1716.js
+          node --check clean/src/live/generic-fallback-v1727.js
           node --check clean/src/live/live-guard-v1720.js
-          node --check clean/src/live/nutrition-lookup-v1720.js
+          node --check clean/src/live/nutrition-lookup-mext-v1728.js
           node --check clean/src/live/live-v1720.js
           node --check clean/src/main-v160.js
 
-      - name: Live delegates official lookup to Tavily pipeline
+      - name: Live delegates nutrition truth to MEXT data
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,buildSetupMessage} from './clean/src/live/config-v1720.js';
+          import {LIVE_VERSION,LIVE_MODEL,SYSTEM_INSTRUCTION,UPDATE_MEAL_DRAFT_DECLARATION,buildSetupMessage} from './clean/src/live/config-v1720.js';
           assert.equal(LIVE_VERSION,'v1.7.25');
           assert.equal(LIVE_MODEL,'gemini-3.1-flash-live-preview');
           const setup=buildSetupMessage().setup;
           assert.equal(setup.tools.length,1);
           assert.equal(setup.tools[0].functionDeclarations[0].name,'update_meal_draft');
-          assert.equal(JSON.stringify(setup.tools).includes('googleSearch'),false);
-          assert.match(SYSTEM_INSTRUCTION,/Tavily/);
-          assert.match(SYSTEM_INSTRUCTION,/Gemini 3\.1 Flash Lite/);
-          assert.match(SYSTEM_INSTRUCTION,/検索がverifiedになる前/);
-          assert.match(SYSTEM_INSTRUCTION,/official-webはアプリ側のTavily/);
-          console.log('Live Tavily delegation policy: OK');
+          const props=UPDATE_MEAL_DRAFT_DECLARATION.parametersJsonSchema.properties.operations.items.properties;
+          assert.ok(props.components);
+          assert.deepEqual(props.nutritionSource.enum,['user-label']);
+          assert.match(SYSTEM_INSTRUCTION,/文部科学省/);
+          assert.match(SYSTEM_INSTRUCTION,/components/);
+          assert.match(SYSTEM_INSTRUCTION,/P\/F\/C\/kcalを生成してはいけません/);
+          assert.doesNotMatch(SYSTEM_INSTRUCTION,/Tavily公式検索/);
+          console.log('MEXT-grounded Live policy: OK');
           NODE
 
-      - name: Serialized Tavily lookup client contract
+      - name: Restaurant Web lookup adapter makes no network request
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
-          import fs from 'node:fs';
+          let fetchCalls=0;
+          globalThis.fetch=async()=>{fetchCalls++;throw new Error('network must stay off')};
           globalThis.location={search:''};
-          globalThis.localStorage={getItem:()=>null,setItem:()=>{}};
-          const mod=await import('./clean/src/live/nutrition-lookup-v1720.js');
-          const {NUTRITION_LOOKUP_MODEL,NUTRITION_LOOKUP_VERSION,NUTRITION_LOOKUP_TIMEOUT_MS,buildNutritionLookupPayload,validateGroundedNutrition,nutritionLookupCacheKey}=mod;
-          assert.equal(NUTRITION_LOOKUP_MODEL,'Tavily + Gemini 3.1 Flash Lite');
-          assert.equal(NUTRITION_LOOKUP_TIMEOUT_MS,30000);
-          assert.equal(NUTRITION_LOOKUP_VERSION,'v1.7.26-tavily-serial');
-          const payload=buildNutritionLookupPayload({foodName:'マックフライポテト L',contextText:'マックでポテトL',candidateNames:['マクドナルド マックフライポテト L']});
-          assert.equal(payload.taskType,'nutritionLookup');
-          const verified=validateGroundedNutrition({status:'verified',grounded:true,officialSource:true,brand:'McDonald’s',productName:'マックフライポテト',servingLabel:'Lサイズ',kcal:517,p:7,f:25.2,c:66,sourceLabel:'マクドナルド公式',sourceUrl:'https://www.mcdonalds.co.jp/products/2050/',sourceDomain:'mcdonalds.co.jp',searchProvider:'tavily',model:'gemini-3.1-flash-lite',verificationMethod:'tavily+official-page-fetch',officialFetchStatus:200,searchCredits:1});
-          assert.equal(verified.kcal,517);
-          assert.equal(verified.searchProvider,'tavily');
-          const key1=nutritionLookupCacheKey(payload);
-          const key2=nutritionLookupCacheKey({...payload,candidateNames:['別候補']});
-          assert.notEqual(key1,key2);
-          const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(lookup,/let lookupQueue=Promise\.resolve\(\)/);
-          assert.match(lookup,/candidate-retry/);
-          assert.match(lookup,/candidateRetryPayload/);
-          assert.match(lookup,/search=Tavily/);
-          assert.doesNotMatch(lookup,/gemini-2\.5-flash/);
-          assert.doesNotMatch(lookup,/upstream-retry/);
-          console.log('Serialized Tavily lookup client: OK');
+          const mod=await import('./clean/src/live/nutrition-lookup-mext-v1728.js');
+          assert.equal(mod.NUTRITION_LOOKUP_VERSION,'v1.7.28-mext-only');
+          assert.equal(mod.NUTRITION_LOOKUP_TIMEOUT_MS,0);
+          const r=await mod.lookupOfficialNutrition({foodName:'CoCo壱番屋 ポークカレー'});
+          assert.equal(r.status,'not_found');
+          assert.equal(r.errorCode,'MEXT_ONLY_MODE');
+          assert.equal(fetchCalls,0);
+          assert.match(mod.formatLookupDiagnosticsText(),/MEXT|Web lookup is disabled/i);
+          console.log('MEXT-only lookup adapter: OK');
           NODE
 
-      - name: Truth-sync and stale-result guard remain intact
+      - name: Recovery instructs MEXT components, never raw AI PFC
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import {buildInternalRecoveryMessage,LIVE_GUARD_VERSION} from './clean/src/live/live-guard-v1720.js';
+          assert.equal(LIVE_GUARD_VERSION,'v1.7.28-mext-grounded');
+          const msg=buildInternalRecoveryMessage({userText:'謎のバーガー',items:[{ref:'x',name:'謎のバーガー',unresolved:true,candidateNames:[]}],attempt:1});
+          assert.match(msg,/文部科学省/);
+          assert.match(msg,/components/);
+          assert.match(msg,/nutritionSource="ai-estimate"は禁止/);
+          assert.doesNotMatch(msg,/Tavilyによる日本向け公式検索/);
+          console.log('MEXT recovery guard: OK');
+          NODE
+
+      - name: Import map routes old Live lookup specifier to MEXT adapter
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
           import fs from 'node:fs';
-          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
-          const guard=fs.readFileSync('./clean/src/live/live-guard-v1720.js','utf8');
-          assert.match(live,/lookupOfficialNutrition/);
-          assert.match(live,/lookupFingerprint/);
-          assert.match(live,/official-stale/);
-          assert.match(live,/official-reset/);
-          assert.match(live,/nutritionSource:'official-web'/);
-          assert.match(live,/buildOfficialResolvedMessage\(\{item:updated,ready:draft\.isReady\(\)\}\)/);
-          assert.match(guard,/__PFC_OFFICIAL_LOOKUP_NOT_FOUND__/);
-          assert.match(guard,/Tavilyによる日本向け公式検索/);
-          assert.match(guard,/内部知識からkcal\/P\/F\/Cを読み上げ/);
-          console.log('Truth-sync and stale-result guard: OK');
-          NODE
-
-      - name: Diagnostics and cache-bust remain state-driven
-        run: |
-          node --input-type=module <<'NODE'
-          import assert from 'node:assert/strict';
-          import fs from 'node:fs';
-          const live=fs.readFileSync('./clean/src/live/live-v1720.js','utf8');
-          const lookup=fs.readFileSync('./clean/src/live/nutrition-lookup-v1720.js','utf8');
-          assert.match(live,/lookupDiagnosticPanelHtml/);
-          assert.match(live,/data-lookup-diagnostic-panel/);
-          assert.match(lookup,/lookupDiagnosticListeners/);
-          assert.match(lookup,/v1\.7\.26-tavily-serial/);
-          assert.doesNotMatch(lookup,/document\.querySelector/);
-          const root=fs.readFileSync('index.html','utf8');
-          const clean=fs.readFileSync('clean/index.html','utf8');
-          assert.match(root,/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
-          assert.match(clean,/nutrition-lookup-v1720\.js\?v=1\.7\.26/);
-          console.log('Persistent Tavily diagnostics + cache-bust: OK');
+          for(const path of ['index.html','clean/index.html']){
+            const html=fs.readFileSync(path,'utf8');
+            assert.match(html,/nutrition-lookup-v1720\.js\?v=1\.7\.25[^\n]*nutrition-lookup-mext-v1728\.js\?v=1\.7\.28/);
+            assert.match(html,/config-v1720\.js\?v=1\.7\.28/);
+            assert.match(html,/draft-v1716\.js\?v=1\.7\.28/);
+            assert.match(html,/live-guard-v1720\.js\?v=1\.7\.28/);
+          }
+          console.log('MEXT runtime cache routing: OK');
           NODE
 
       - name: Browser back still releases microphone
