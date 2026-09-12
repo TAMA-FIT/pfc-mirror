@@ -1,0 +1,27 @@
+name: MEXT full-table import diagnostic
+
+on:
+  pull_request:
+    paths:
+      - 'scripts/inspect_mext_xlsx.py'
+      - '.github/workflows/mext-full-import-check.yml'
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download official corrected MEXT main table
+        run: |
+          set -euxo pipefail
+          curl -fL --retry 3 --connect-timeout 20 \
+            'https://www.mext.go.jp/content/20260327-mxt_kagsei-mext-000029402_02.xlsx' \
+            -o /tmp/mext.xlsx
+          ls -lh /tmp/mext.xlsx
+          python - <<'PY'
+          import zipfile
+          p='/tmp/mext.xlsx'
+          print('is_zipfile=', zipfile.is_zipfile(p))
+          PY
+      - name: Inspect workbook structure
+        run: python scripts/inspect_mext_xlsx.py /tmp/mext.xlsx
