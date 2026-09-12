@@ -8,7 +8,7 @@ const LABEL = '文部科学省 日本食品標準成分表';
 const mext = (name,itemNo,officialName,p,f,c,kcal,a=0) => Object.freeze({
   name,
   canonicalId:`mext:${itemNo}`,
-  source:Object.freeze({kind:'mext',label:LABEL,itemNo,officialName,datasetSha256:SHA,verifiedAt:'2026-08-12',per100g:Object.freeze({p,f,c,kcal,a})})
+  source:Object.freeze({kind:'mext',label:LABEL,itemNo,officialName,datasetSha256:SHA,verifiedAt:'2026-09-12',per100g:Object.freeze({p,f,c,kcal,a})})
 });
 
 export const MEXT_ENTRIES = Object.freeze([
@@ -57,12 +57,17 @@ export const MEXT_ENTRIES = Object.freeze([
   mext('本みりん','16025','混成酒類 みりん 本みりん',0.3,0.0,43.2,241,9.5),
   mext('豚肩ロース(脂身つき)','11119','ぶた 大型種肉 かたロース 脂身つき 生',17.1,19.2,0.1,237),
   mext('鶏手羽元(皮つき)','11286','にわとり 若どり 手羽もと 皮つき 生',18.2,12.8,0.0,175),
-  mext('はちみつ','03022','その他 はちみつ',0.3,0.0,81.9,329)
+  mext('はちみつ','03022','その他 はちみつ',0.3,0.0,81.9,329),
+  // Prepared foods used by MEXT-grounded restaurant/commercial fallback.
+  mext('ポークカレー','18041','調理済み流通食品類 洋風料理 カレー類 ポークカレー',2.8,8.6,7.7,116),
+  mext('チキンカレー','18040','調理済み流通食品類 洋風料理 カレー類 チキンカレー',5.6,8.8,8.4,131),
+  mext('ビーフカレー','18001','調理済み流通食品類 洋風料理 カレー類 ビーフカレー',2.4,9.0,8.1,119),
+  mext('フライドポテト(市販冷凍)','02020','じゃがいも 塊茎 皮なし フライドポテト 市販冷凍食品を揚げたもの',2.9,10.6,32.4,229)
 ]);
 
 export const FOOD_DATA_META = Object.freeze({
   baseRows: BASE_FOOD_ROWS.length,
   mextRows: MEXT_ENTRIES.length,
   datasetSha256: SHA,
-  architecture: 'clean-data-bridge-v1'
+  architecture: 'clean-data-bridge-v1+mext-grounded-v1728'
 });
